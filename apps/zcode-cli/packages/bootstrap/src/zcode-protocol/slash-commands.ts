@@ -8,6 +8,7 @@ import {
   APP_PROTOCOL_VISIBLE_BUILTIN_SLASH_COMMAND_NAMES,
   isReservedZCodeSlashCommandName,
 } from "../slash-command-surface.js";
+import { getCachedCustomCommands, setCachedCustomCommands } from "./slashCommandCache.js";
 
 /**
  * `workflow` 是 zcode-guide 内置插件的自定义命令，随 CLI 打包，不受用户 commandOverrides
@@ -30,8 +31,22 @@ export async function listProtocolSlashCommands(
   const builtins = listAppProtocolBuiltinSlashCommands();
   let customCommands: Awaited<ReturnType<typeof listZCodeCustomCommands>>["commands"] = [];
   try {
-    const outcome = await listZCodeCustomCommands(options);
-    customCommands = outcome.commands;
+    // perf: cache discovery per workspace — the filesystem/plugin scan takes ~5.5s
+    // and blocks readWorkspacePresentation on every session switch. Cache hit
+    // returns instantly and refreshes in the background.
+    const cacheKey = options.workingDirectory ?? "";
+    const cached = getCachedCustomCommands(cacheKey);
+    if (cached) {
+      customCommands = cached;
+      void listZCodeCustomCommands(options).then(
+        (outcome) => setCachedCustomCommands(cacheKey, outcome.commands),
+        () => {},
+      );
+    } else {
+      const outcome = await listZCodeCustomCommands(options);
+      customCommands = outcome.commands;
+      setCachedCustomCommands(cacheKey, outcome.commands);
+    }
   } catch {
     // 自定义命令发现失败不应阻断 session snapshot；保留可执行的内置协议命令。
     customCommands = [];

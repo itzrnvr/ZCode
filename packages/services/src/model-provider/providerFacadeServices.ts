@@ -19,6 +19,7 @@ import {
 import { createServiceDescriptor } from "../descriptors.js";
 import type { ModelConnectivityResult } from "@zcode/shared";
 import { createServiceLogger } from "../logger/serviceLogger.js";
+import { refreshWithTimeout } from "./refreshWithTimeout.js";
 
 export type {
   ProviderSettingsProviderView,
@@ -119,7 +120,13 @@ export function createProviderSettingsService(
     },
     refresh: async (reason) => {
       await ensureReady();
-      return facade.refresh(reason);
+      // perf: cap the wait — zcode.z.ai account-provider probes can block ~9s.
+      // Resolve with the current view after 2s; the refresh keeps running and
+      // publishes via onDidChange when it lands.
+      return refreshWithTimeout(
+        () => facade.refresh(reason),
+        () => facade.getView(),
+      );
     },
     createPersonalProvider: async (input) => {
       await ensureReady();

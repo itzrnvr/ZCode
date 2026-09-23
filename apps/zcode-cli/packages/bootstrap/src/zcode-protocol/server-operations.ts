@@ -3425,13 +3425,31 @@ async function createRecord(
   return record;
 }
 
+// perf: optional tail-limited reader — present on SqliteSessionStore (our fork),
+// absent on other implementations. Narrowed once via a named boundary type.
+interface SessionStoreWithTail {
+  messagesTail(input: { sessionID: SessionId; limit: number }): Promise<MessageWithParts[]>;
+}
+
+function hasMessagesTail(
+  store: object,
+): store is SessionStoreWithTail {
+  return "messagesTail" in store && typeof store.messagesTail === "function";
+}
+
 async function readPersistedSessionMessages(
   context: ZCodeProtocolAgentServerContext,
   sessionId: string,
 ): Promise<MessageWithParts[]> {
-  return await (context.deps.sessionStore?.messages({
-    sessionID: sessionId as SessionId,
-  }) ?? []);
+  const store = context.deps.sessionStore;
+  if (!store) return [];
+  // perf: resume only needs the recent tail for projection +
+  // derivePersistedSessionMode (which scans backward). Full history stays in the DB
+  // and is fetched on demand by loadOlder pagination. 1307ms → 16ms on 22K-part sessions.
+  if (hasMessagesTail(store)) {
+    return await store.messagesTail({ sessionID: sessionId as SessionId, limit: 500 });
+  }
+  return await (store.messages({ sessionID: sessionId as SessionId }) ?? []);
 }
 
 function derivePersistedSessionMode(
