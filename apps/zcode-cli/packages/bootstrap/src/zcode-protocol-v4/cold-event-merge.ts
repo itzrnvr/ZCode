@@ -37,6 +37,8 @@ interface PersistedConversationMaterializationStore {
     };
   } | null>;
   messages(input: { sessionID: import("@zcode/contracts").SessionId }): Promise<MessageWithParts[]>;
+  // perf: optional tail-limited load — loads only last N parts instead of all
+  messagesTail?(input: { sessionID: import("@zcode/contracts").SessionId; limit: number }): Promise<MessageWithParts[]>;
   readTarget(input: {
     sessionID: import("@zcode/contracts").SessionId;
   }): Promise<SessionGoal | null>;
@@ -71,7 +73,7 @@ export async function loadPersistedConversationMaterialization(input: {
   const sessionID = input.sessionId as import("@zcode/contracts").SessionId;
   const [session, allMessages, target, entries] = await Promise.all([
     input.store.getSession(sessionID),
-    input.persistedMessages ?? input.store.messages({ sessionID }),
+    input.store.messagesTail?.({ sessionID, limit: 500 }) ?? input.persistedMessages ?? input.store.messages({ sessionID }),
     input.store.readTarget({ sessionID }),
     input.store.sessionEntries ? input.store.sessionEntries({ sessionID }) : Promise.resolve([]),
   ]);

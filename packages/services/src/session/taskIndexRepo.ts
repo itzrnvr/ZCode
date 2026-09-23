@@ -530,6 +530,7 @@ export class TaskIndexRepo {
       this.db.exec("PRAGMA foreign_keys = ON");
       this.db.exec("PRAGMA journal_mode = WAL");
       this.db.exec("PRAGMA synchronous = NORMAL");
+      this.db.exec("PRAGMA cache_size = -65536"); // perf: 64MB cache for tasks DB
     }
     // Worker 已完成该路径的原始准备，业务连接不再重复全表修复。
     if (isTasksStoragePrepared(path, this.db)) return;
