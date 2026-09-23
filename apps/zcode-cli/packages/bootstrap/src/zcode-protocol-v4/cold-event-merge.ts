@@ -37,6 +37,8 @@ interface PersistedConversationMaterializationStore {
     };
   } | null>;
   messages(input: { sessionID: import("@zcode/contracts").SessionId }): Promise<MessageWithParts[]>;
+  // perf: optional tail-limited load — loads only last N parts instead of all
+  messagesTail?(input: { sessionID: import("@zcode/contracts").SessionId; limit: number }): Promise<MessageWithParts[]>;
   readTarget(input: {
     sessionID: import("@zcode/contracts").SessionId;
   }): Promise<SessionGoal | null>;
@@ -68,19 +70,22 @@ export async function loadPersistedConversationMaterialization(input: {
       messages: [],
     };
   }
+  const __perfStart = Date.now();
   const sessionID = input.sessionId as import("@zcode/contracts").SessionId;
   const [session, allMessages, target, entries] = await Promise.all([
     input.store.getSession(sessionID),
-    input.persistedMessages ?? input.store.messages({ sessionID }),
+    input.store.messagesTail?.({ sessionID, limit: 500 }) ?? input.persistedMessages ?? input.store.messages({ sessionID }),
     input.store.readTarget({ sessionID }),
     input.store.sessionEntries ? input.store.sessionEntries({ sessionID }) : Promise.resolve([]),
   ]);
+  console.log("[PERF] cold-event-merge: DB+store load=" + (Date.now() - __perfStart) + "ms msgs=" + allMessages.length + " parts=" + allMessages.reduce(function (s, m) { return s + m.parts.length; }, 0));
   const messages = selectActiveConversationBranch(allMessages, {
     branchCutAfterMessageId: session?.revert?.branchCutAfterMessageID,
     rewindCreatedMessageId: session?.revert?.createdMessageID,
     rewindKeptMessageIds: session?.revert?.keptMessageIDs,
     rewindTargetMessageId: session?.revert?.targetMessageID,
   });
+  console.log("[PERF] cold-event-merge: selectBranch=" + (Date.now() - __perfStart) + "ms total, " + messages.length + " active messages");
   const sharedContextMessage = messages.find(
     (message) =>
       message.info.role === "user" &&
@@ -111,6 +116,7 @@ export async function loadPersistedConversationMaterialization(input: {
           }
         : { title: session.title.trim() }
       : undefined;
+  console.log("[PERF] cold-event-merge: TOTAL=" + (Date.now() - __perfStart) + "ms, returning " + messages.length + " messages");
   return {
     goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
     memoryEvents: [...input.memoryEvents],

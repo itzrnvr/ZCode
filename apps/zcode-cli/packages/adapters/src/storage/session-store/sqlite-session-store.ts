@@ -94,6 +94,7 @@ import { createDwfJournalStore } from "./repositories/dwf-journal.js";
 import * as inputHistoryRepository from "./repositories/input-history.js";
 import * as localSettingsRepository from "./repositories/local-settings.js";
 import * as messageRepository from "./repositories/messages.js";
+import { messagesTail } from "./repositories/messagesTail.js";
 import * as scriptWorkflowActivityRepository from "./repositories/script-workflow-activities.js";
 import * as scriptWorkflowRunRepository from "./repositories/script-workflow-runs.js";
 import * as sessionEntryRepository from "./repositories/session-entries.js";
@@ -256,6 +257,7 @@ export class SqliteSessionStore
         },
       );
     }
+    this.db.exec("PRAGMA cache_size = -131072");
     try {
       if (startupToken !== deferredStartup)
         runSqliteSessionMigrations(this.db, this.dbPath, startupLockTimeoutMs);
@@ -645,6 +647,11 @@ export class SqliteSessionStore
 
   async messages(input: { sessionID: SessionId }): Promise<MessageWithParts[]> {
     return messageRepository.messages(this.db, input);
+  }
+
+  // perf: tail-limited load for fast initial conversation hydration
+  async messagesTail(input: { sessionID: SessionId; limit: number }): Promise<MessageWithParts[]> {
+    return messagesTail(this.db, input);
   }
 
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {
