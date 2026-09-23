@@ -1,3 +1,4 @@
+> **Fork-specific instructions:** Read [`CLAUDE.md`](./CLAUDE.md) for conflict-resistant development rules, feature registry, build/deploy, and upstream sync procedures. This is a fork with custom features — fork instructions take precedence over the guidelines below.
 ## 核心原则
 
 - 新增或修改行为前，先更新对应 spec；目录不存在时按需创建。先明确产品规则、状态所有者、接口和验收场景，再实现代码。
