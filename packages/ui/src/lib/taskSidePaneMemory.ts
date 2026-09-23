@@ -3,6 +3,8 @@ import {
   normalizeWorkspaceSidePaneState,
   type WorkspaceSidePaneState,
 } from "@/lib/workspaceSidePane.js";
+// --- side-chat persistence integration (single import line) ---
+import { readPersistedSidePaneState, persistSidePaneState } from "./sidePanePersistence.js";
 
 interface TaskSidePaneMemoryState {
   sidePaneState: WorkspaceSidePaneState | null;
@@ -74,7 +76,14 @@ export function readTaskSidePaneMemoryState(key: string | null): TaskSidePaneMem
     return DEFAULT_TASK_SIDE_PANE_MEMORY_STATE;
   }
 
-  const state = taskSidePaneMemory.get(key);
+  let state = taskSidePaneMemory.get(key);
+  if (!state) {
+    // side-chat persistence: fallback to localStorage on renderer reload
+    state = readPersistedSidePaneState(key);
+    if (state) {
+      taskSidePaneMemory.set(key, state);
+    }
+  }
   if (!state) {
     return DEFAULT_TASK_SIDE_PANE_MEMORY_STATE;
   }
@@ -115,6 +124,8 @@ export function saveTaskSidePaneMemoryState(
   nextState.sidePaneState = normalizeWorkspaceSidePaneState(nextState.sidePaneState);
   touchTaskSidePaneMemoryEntry(key, nextState);
   pruneTaskSidePaneMemory();
+  // side-chat persistence: mirror to localStorage
+  persistSidePaneState(key, nextState);
 }
 
 export function getSidePaneCollapsedPreference(

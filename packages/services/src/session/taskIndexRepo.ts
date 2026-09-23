@@ -38,6 +38,8 @@ import type {
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import { getTasksIndexDatabasePath } from "#src/paths.js";
 import { runTasksDatabaseMigrations } from "#src/session/tasksDatabase/migrations.js";
+// side-chat filter integration (single import line)
+import { excludeSideChats } from "#src/session/sideChatFilter.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -1723,7 +1725,7 @@ export class TaskIndexRepo {
         pinned: typeof params.pinned === "boolean" ? (params.pinned ? 1 : 0) : null,
         archived: typeof params.archived === "boolean" ? (params.archived ? 1 : 0) : null,
       }) as unknown as TaskIndexRow[];
-    return rows.map(rowToMeta);
+    return excludeSideChats(rows.map(rowToMeta));
   }
 
   /**
@@ -1883,11 +1885,11 @@ export class TaskIndexRepo {
     );
 
     return {
-      items: rows.map((row) => {
+      items: excludeSideChats(rows.map((row) => {
         const item = rowToTaskListItem(row, search ?? null);
         const workspacePurpose = workspacePurposeByKey.get(row.workspace_key);
         return workspacePurpose ? { ...item, workspacePurpose } : item;
-      }),
+      })),
       total,
       hasMore: total > rows.length,
     };
@@ -2093,7 +2095,7 @@ export class TaskIndexRepo {
       // 残留过滤口径；否则历史 claude/codex/gemini 索引行会只在 grouped 里冒出来。
       appendZCodeAgentIndexedProviderFilter(activeTaskWhere, activeTaskArgs, params.provider);
     }
-    const activeTasks =
+    const activeTasks = excludeSideChats(
       !includeAllWorkspaces && workspaceKeys.length === 0
         ? []
         : (this.getDatabase()
@@ -2123,7 +2125,8 @@ export class TaskIndexRepo {
               FROM tasks
               WHERE ${activeTaskWhere.join(" AND ")}`,
             )
-            .all(...activeTaskArgs) as unknown as TaskIndexRow[]);
+            .all(...activeTaskArgs) as unknown as TaskIndexRow[])
+    );
     const workspaceScopes = includeAllWorkspaces
       ? normalizeWorkspaceBootstrapScopes(
           activeTasks.map((row) => ({
