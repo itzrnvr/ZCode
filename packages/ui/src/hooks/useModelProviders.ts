@@ -14,6 +14,7 @@ import { persistProviderDisplayOrder } from "@/lib/providerDisplayOrderPersisten
 import { persistPersonalProviderDeletion } from "@/lib/providerPersonalPersistence.js";
 import { persistPersonalProvider } from "@/lib/providerPersonalSave.js";
 import type { ProviderOrderView } from "@/lib/modelProviderOrdering.js";
+import { withSettingsCache } from "@/lib/providerSettingsCache.js";
 
 export function useModelProviders(target: {
   workspacePath: string;
@@ -61,7 +62,7 @@ export function useModelProviders(target: {
     latestRefreshTokenRef.current = refreshToken;
     setRefreshing(true);
     try {
-      const view = await providerSettingsService.refresh("settings-manual");
+      const view = await withSettingsCache(() => providerSettingsService.refresh("settings-manual"));
       commitProviderSettingsView(view);
     } catch (err) {
       logger.error("[useModelProviders] 加载模型供应商失败", err);

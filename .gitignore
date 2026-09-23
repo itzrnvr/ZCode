@@ -71,3 +71,4 @@ packages/desktop/.e2e-network-capture/
 .zcode-runtime/
 rebuild*.log
 perf*.log
+*.log
