@@ -359,6 +359,7 @@ async function startCanonicalIntent(
       // canonical copy would otherwise resurrect the stale TurnStarted model
       // and core persists it back into the session. Run on live selection.
       modelSelection: resolveEditRetryModelSelection(record, editTarget.intent.modelSelection),
+      mode: editTarget.intent.mode,
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,
       provenance: editTarget.intent.provenance,
