@@ -72,6 +72,10 @@ export interface V4SessionRecordView {
   /** 恢复失败告警：存在时拒绝新 turn（历史损坏不能静默续写）。 */
   restoreWarning?: { message: string; type: string };
   taskType?: SessionTaskType;
+  // Fork: global system-prompt kill-switches snapshot (binder passes full record through).
+  systemPromptSecurityNoticeEnabled: boolean;
+  systemPromptAutoMemoryEnabled: boolean;
+  systemPromptAgentsMdEnabled: boolean;
 }
 
 export interface V4CommandCoreHost {

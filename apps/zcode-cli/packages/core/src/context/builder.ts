@@ -20,6 +20,8 @@ import { buildSkillsSection } from "./sections/skills.js";
 import { buildRequestUserContextSection } from "./sections/request-user-context.js";
 import { buildCurrentDateSection } from "./sections/current-date.js";
 import { buildMemorySection } from "./sections/memory.js";
+// Fork: system-prompt kill-switch integration (single import line).
+import { getSystemPromptSwitches } from "./system-prompt-switches.js";
 import { buildDesktopContextSection } from "./sections/desktop.js";
 import {
   buildContextManagementSection,
@@ -149,7 +151,9 @@ export class ContextBuilder {
       }
 
       // Memory
-      if (this.config.memoryRoot) {
+      // Fork: auto-memory kill-switch. Off drops the whole section (distinct from
+      // features.memory use toggle, which governs extraction/format behavior).
+      if (getSystemPromptSwitches().autoMemoryEnabled && this.config.memoryRoot) {
         const memorySection = buildMemorySection(this.config.memoryRoot);
         if (memorySection) {
           sections.push(memorySection);
@@ -187,11 +191,15 @@ export class ContextBuilder {
     }
 
     // 5. Meta user context: workspace instructions/project memory first, date second.
-    const requestUserContextSection = buildRequestUserContextSection({
-      userInstructions: this.config.userInstructions,
-      memoryIndexContent: this.config.memoryIndexContent,
-      memoryRoot: this.config.memoryRoot,
-    });
+    // Fork: agentsMd kill-switch. Off drops AGENTS.md + project memory index entirely —
+    // the section disappears even when userInstructions resolved.
+    const requestUserContextSection = getSystemPromptSwitches().agentsMdEnabled
+      ? buildRequestUserContextSection({
+          userInstructions: this.config.userInstructions,
+          memoryIndexContent: this.config.memoryIndexContent,
+          memoryRoot: this.config.memoryRoot,
+        })
+      : null;
     if (requestUserContextSection) {
       sections.push(requestUserContextSection);
     }

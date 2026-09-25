@@ -79,6 +79,14 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     titleId: "settings.memory",
     groupId: "agentCapabilities",
   },
+  // Fork: global system-prompt kill-switches. Sits right after Memory because
+  // all three switches gate prompt sections, not storage or behavior.
+  {
+    id: "systemPrompt",
+    icon: Settings,
+    titleId: "settings.systemPrompt",
+    groupId: "agentCapabilities",
+  },
   {
     id: "subagents",
     icon: Bot,

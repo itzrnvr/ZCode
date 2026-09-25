@@ -5,6 +5,8 @@
 export * from "./types.js";
 export * from "./builder.js";
 export * from "./utils.js";
+// Fork: system-prompt kill-switch state (single export line).
+export { getSystemPromptSwitches, setSystemPromptSwitches } from "./system-prompt-switches.js";
 
 // Section builders (for testing)
 export { buildCliPrefixSection } from "./sections/cli-prefix.js";

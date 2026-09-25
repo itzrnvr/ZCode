@@ -369,6 +369,8 @@ export const TID_RESOURCE_MANAGER_STORAGE_CONFIRM_CANCEL =
   "resource-manager-storage-confirm-cancel";
 /** Memory 设置模块中的总开关 */
 export const TID_SETTINGS_MEMORY_SWITCH = "settings-memory-switch";
+/** System Prompt 设置模块中的开关（后缀区分 security-notice/auto-memory/agents-md） */
+export const TID_SETTINGS_SYSTEM_PROMPT_SWITCH = "settings-system-prompt-switch";
 /** Memory 设置模块刷新按钮 */
 export const TID_SETTINGS_MEMORY_REFRESH = "settings-memory-refresh";
 /** Memory Workspace Scope 菜单触发器 */

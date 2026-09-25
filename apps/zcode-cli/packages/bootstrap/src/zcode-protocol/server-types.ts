@@ -84,6 +84,10 @@ export interface ZCodeProtocolSessionRecord {
   memoryEnabled: boolean;
   nativeSearchEnhancementsEnabled: boolean;
   modelContextBudgetStrategy: ZCodeModelContextBudgetStrategy;
+  // Fork: global system-prompt kill-switches snapshot at record creation (child records inherit).
+  systemPromptSecurityNoticeEnabled: boolean;
+  systemPromptAutoMemoryEnabled: boolean;
+  systemPromptAgentsMdEnabled: boolean;
   createdAt: number;
   deliveryKind?: ZCodeDeliveryKind;
   /**

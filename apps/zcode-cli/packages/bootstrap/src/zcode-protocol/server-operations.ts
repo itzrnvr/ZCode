@@ -143,6 +143,10 @@ interface SessionStartupPreferences {
   memoryEnabled: boolean;
   modelContextBudgetStrategy: ZCodeModelContextBudgetStrategy;
   nativeSearchEnhancementsEnabled: boolean;
+  // Fork: global system-prompt kill-switches. Default true (full upstream stack).
+  systemPromptSecurityNoticeEnabled: boolean;
+  systemPromptAutoMemoryEnabled: boolean;
+  systemPromptAgentsMdEnabled: boolean;
   resolveInitialBashShellSelection: () => Promise<ExecutionShellSelection | undefined>;
 }
 
@@ -3211,12 +3215,15 @@ async function requestSessionRuntimePreferences(
     }
     if (error instanceof ProtocolRequestError && (error.code === -32601 || error.code === -32020)) {
       // 兼容旧 Host 或无 Host 的纯 CLI 创建路径；Memory 服从产品默认关闭，
-      // 增强搜索维持原有默认开启，其他协议/传输错误仍阻止 runtime 创建。
+      // Fork switches default to full upstream stack on old host paths.
       return {
         askUserQuestionAutoResolutionEnabled: true,
         memoryEnabled: false,
         modelContextBudgetStrategy: DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
         nativeSearchEnhancementsEnabled: true,
+        systemPromptSecurityNoticeEnabled: true,
+        systemPromptAutoMemoryEnabled: true,
+        systemPromptAgentsMdEnabled: true,
       };
     }
     throw error;
@@ -3235,6 +3242,9 @@ async function resolveSessionStartupPreferences(
       memoryEnabled: source.parent.memoryEnabled,
       modelContextBudgetStrategy: DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
       nativeSearchEnhancementsEnabled: source.parent.nativeSearchEnhancementsEnabled,
+      systemPromptSecurityNoticeEnabled: source.parent.systemPromptSecurityNoticeEnabled,
+      systemPromptAutoMemoryEnabled: source.parent.systemPromptAutoMemoryEnabled,
+      systemPromptAgentsMdEnabled: source.parent.systemPromptAgentsMdEnabled,
       resolveInitialBashShellSelection: async () => inheritedShellSelection,
     };
   }
@@ -3253,6 +3263,9 @@ async function resolveSessionStartupPreferences(
     memoryEnabled: runtimePreferences.memoryEnabled,
     modelContextBudgetStrategy: DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
     nativeSearchEnhancementsEnabled: runtimePreferences.nativeSearchEnhancementsEnabled,
+    systemPromptSecurityNoticeEnabled: runtimePreferences.systemPromptSecurityNoticeEnabled,
+    systemPromptAutoMemoryEnabled: runtimePreferences.systemPromptAutoMemoryEnabled,
+    systemPromptAgentsMdEnabled: runtimePreferences.systemPromptAgentsMdEnabled,
     resolveInitialBashShellSelection: async () => {
       const executionPreferences = await requestSessionRuntimePreferences(
         context,
@@ -3404,6 +3417,9 @@ async function createRecord(
     memoryEnabled: startupPreferences.memoryEnabled,
     modelContextBudgetStrategy: startupPreferences.modelContextBudgetStrategy,
     nativeSearchEnhancementsEnabled: startupPreferences.nativeSearchEnhancementsEnabled,
+    systemPromptSecurityNoticeEnabled: startupPreferences.systemPromptSecurityNoticeEnabled,
+    systemPromptAutoMemoryEnabled: startupPreferences.systemPromptAutoMemoryEnabled,
+    systemPromptAgentsMdEnabled: startupPreferences.systemPromptAgentsMdEnabled,
     ...(parentSessionId ? { parentSessionId } : {}),
     persistence: "persistence" in params ? (params.persistence ?? "immediate") : "immediate",
     protocolEventSequences: new Map(),

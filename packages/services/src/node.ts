@@ -2252,6 +2252,11 @@ export function createLocalServices(options: {
               nativeSearchEnhancementsEnabled: settings.nativeSearchEnhancementsEnabled !== false,
               memoryEnabled: settings.memoryEnabled === true,
               modelContextBudgetStrategy,
+              // Fork: system-prompt kill-switches. Absent (legacy setting.json) reads as full stack.
+              systemPromptSecurityNoticeEnabled:
+                settings.systemPromptSecurityNoticeEnabled !== false,
+              systemPromptAutoMemoryEnabled: settings.systemPromptAutoMemoryEnabled !== false,
+              systemPromptAgentsMdEnabled: settings.systemPromptAgentsMdEnabled !== false,
               // user-execution 只消费 Shell；共享默认策略是统一 result schema 的兼容占位，
               // 不会覆盖 runtime-materialization 阶段已经固定的 strategy。
               ...(scope === "user-execution" && settings.integratedTerminalShell

@@ -5,13 +5,15 @@
 import type { ContextSection } from "../types.js";
 import type { OutputStylePromptConfig } from "../types.js";
 import { estimateTokens } from "../utils.js";
+// Fork: system-prompt kill-switch integration (single import line).
+import { getSystemPromptSwitches } from "../system-prompt-switches.js";
 
 const SECURITY_NOTICE =
   "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.";
 
-/** 安全 IMPORTANT 行：交互式身份与工作流子代理身份共用，逐字同一份。 */
+/** 安全 IMPORTANT 行：交互式身份与工作流子代理身份共用，逐字同一份。Off = 空串。 */
 export function buildSecurityNotice(): string {
-  return SECURITY_NOTICE;
+  return getSystemPromptSwitches().securityNoticeEnabled ? SECURITY_NOTICE : "";
 }
 
 /**
@@ -34,7 +36,11 @@ function buildIdentityPrompt(outputStyle?: OutputStylePromptConfig): string {
     ? "You respond to the user according to the active Output Style below while using ZCode's tools and instructions."
     : "You are an interactive ZCode agent that helps users with software engineering tasks.";
 
-  const identityLines = ["", intro, "", SECURITY_NOTICE].join("\n");
+  // Fork: security-notice kill-switch. Off = intro only, no refusal block anywhere
+  // (workflow-actor reuses buildSecurityNotice() so it inherits this too).
+  const identityLines = getSystemPromptSwitches().securityNoticeEnabled
+    ? ["", intro, "", SECURITY_NOTICE].join("\n")
+    : ["", intro].join("\n");
 
   return [identityLines, "", buildHarnessBlock()].join("\n");
 }
