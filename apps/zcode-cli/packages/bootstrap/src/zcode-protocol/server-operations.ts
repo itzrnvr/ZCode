@@ -150,6 +150,8 @@ interface SessionStartupPreferences {
   // Fork: custom prompt texts. Absent/empty = upstream default text.
   systemPromptSecurityNoticeText?: string;
   systemPromptCustomText?: string;
+  // Fork: per-section overrides keyed by section key. Absent = defaults.
+  systemPromptSectionTexts?: Record<string, string>;
   resolveInitialBashShellSelection: () => Promise<ExecutionShellSelection | undefined>;
 }
 
@@ -3250,6 +3252,7 @@ async function resolveSessionStartupPreferences(
       systemPromptAgentsMdEnabled: source.parent.systemPromptAgentsMdEnabled,
       systemPromptSecurityNoticeText: source.parent.systemPromptSecurityNoticeText,
       systemPromptCustomText: source.parent.systemPromptCustomText,
+      systemPromptSectionTexts: source.parent.systemPromptSectionTexts,
       resolveInitialBashShellSelection: async () => inheritedShellSelection,
     };
   }
@@ -3273,6 +3276,7 @@ async function resolveSessionStartupPreferences(
     systemPromptAgentsMdEnabled: runtimePreferences.systemPromptAgentsMdEnabled,
     systemPromptSecurityNoticeText: runtimePreferences.systemPromptSecurityNoticeText,
     systemPromptCustomText: runtimePreferences.systemPromptCustomText,
+    systemPromptSectionTexts: runtimePreferences.systemPromptSectionTexts,
     resolveInitialBashShellSelection: async () => {
       const executionPreferences = await requestSessionRuntimePreferences(
         context,
@@ -3429,6 +3433,7 @@ async function createRecord(
     systemPromptAgentsMdEnabled: startupPreferences.systemPromptAgentsMdEnabled,
     systemPromptSecurityNoticeText: startupPreferences.systemPromptSecurityNoticeText,
     systemPromptCustomText: startupPreferences.systemPromptCustomText,
+    systemPromptSectionTexts: startupPreferences.systemPromptSectionTexts,
     ...(parentSessionId ? { parentSessionId } : {}),
     persistence: "persistence" in params ? (params.persistence ?? "immediate") : "immediate",
     protocolEventSequences: new Map(),

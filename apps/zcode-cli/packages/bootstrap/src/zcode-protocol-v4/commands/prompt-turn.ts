@@ -69,6 +69,9 @@ export async function startPromptTurn(
     agentsMdEnabled: record.systemPromptAgentsMdEnabled,
     securityNoticeText: record.systemPromptSecurityNoticeText,
     customText: record.systemPromptCustomText,
+    sectionTexts: record.systemPromptSectionTexts as Partial<
+      Record<"cli-prefix" | "harness" | "desktop-context" | "dynamic-behavior" | "context-management", string>
+    >,
   });
   const usesExecutionSelection = params.modelExecution?.selectionScope === "execution";
   if (!usesExecutionSelection && record.restoreWarning) {

@@ -1,7 +1,12 @@
 import type { ContextSection } from "../types.js";
 import { estimateTokens } from "../utils.js";
+// Fork: per-section override (single import line).
+import { getSectionTextOverride } from "../system-prompt-switches.js";
 
 export function buildDesktopContextSection(): ContextSection {
+  // Fork: per-section override. Non-empty settings text replaces the block verbatim.
+  const override = getSectionTextOverride("desktop-context");
+  if (override) return createDesktopSection("ZCode Desktop Context", "desktop_context", override);
   return createDesktopSection(
     "ZCode Desktop Context",
     "desktop_context",

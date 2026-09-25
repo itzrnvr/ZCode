@@ -2264,6 +2264,17 @@ export function createLocalServices(options: {
               ...(settings.systemPromptCustomText?.trim()
                 ? { systemPromptCustomText: settings.systemPromptCustomText }
                 : {}),
+              // Fork: per-section overrides. Only non-empty values cross the wire.
+              ...(settings.systemPromptSectionTexts &&
+              Object.values(settings.systemPromptSectionTexts).some((v) => v?.trim())
+                ? {
+                    systemPromptSectionTexts: Object.fromEntries(
+                      Object.entries(settings.systemPromptSectionTexts).filter(
+                        ([, v]) => typeof v === "string" && v.trim(),
+                      ),
+                    ),
+                  }
+                : {}),
               // user-execution 只消费 Shell；共享默认策略是统一 result schema 的兼容占位，
               // 不会覆盖 runtime-materialization 阶段已经固定的 strategy。
               ...(scope === "user-execution" && settings.integratedTerminalShell

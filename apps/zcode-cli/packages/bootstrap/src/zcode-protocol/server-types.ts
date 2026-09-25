@@ -91,6 +91,8 @@ export interface ZCodeProtocolSessionRecord {
   // Fork: custom prompt texts snapshot (absent/empty = upstream default).
   systemPromptSecurityNoticeText?: string;
   systemPromptCustomText?: string;
+  // Fork: per-section overrides snapshot (absent = defaults).
+  systemPromptSectionTexts?: Record<string, string>;
   createdAt: number;
   deliveryKind?: ZCodeDeliveryKind;
   /**

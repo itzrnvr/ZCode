@@ -341,6 +341,12 @@ export interface AppSettings {
    */
   systemPromptSecurityNoticeText?: string;
   systemPromptCustomText?: string;
+  /**
+   * Fork: per-section text overrides, keyed by section key
+   * (cli-prefix, harness, desktop-context, dynamic-behavior, context-management).
+   * Non-empty value replaces that section's default text verbatim.
+   */
+  systemPromptSectionTexts?: Record<string, string>;
   onboardingOccupation?:
     | "office"
     | "developer"

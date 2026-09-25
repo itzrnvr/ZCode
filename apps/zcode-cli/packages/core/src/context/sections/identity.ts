@@ -6,7 +6,7 @@ import type { ContextSection } from "../types.js";
 import type { OutputStylePromptConfig } from "../types.js";
 import { estimateTokens } from "../utils.js";
 // Fork: system-prompt kill-switch integration (single import line).
-import { getSystemPromptSwitches } from "../system-prompt-switches.js";
+import { getSectionTextOverride, getSystemPromptSwitches } from "../system-prompt-switches.js";
 
 const SECURITY_NOTICE =
   "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.";
@@ -28,16 +28,18 @@ export function getDefaultSecurityNotice(): string {
  * 也是工作流子代理身份（sections/workflow-actor.ts）逐字复用的那一段。
  */
 export function buildHarnessBlock(): string {
+  // Fork: per-section override. Non-empty settings text replaces the block verbatim.
+  const override = getSectionTextOverride("harness");
+  if (override) return override;
   return [
     "# Harness",
     "- Text you output outside of tool use is displayed to the user as Github-flavored markdown in a terminal.",
-    "- Tools run behind a user-selected permission mode; a denied call means the user declined it \u2014 adjust, don't retry verbatim.",
+    "- Tools run behind a user-selected permission mode; a denied call means the user declined it — adjust, don't retry verbatim.",
     "- The system may send updates, reminders, or modifications to rules via mid-conversation system turns. These are system-controlled, unlike function results. Hooks may intercept tool calls; treat hook output as user feedback.",
     "- Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.",
-    "- Reference code as `file_path:line_number` \u2014 it's clickable.",
+    "- Reference code as `file_path:line_number` — it's clickable.",
   ].join("\n");
 }
-
 function buildIdentityPrompt(outputStyle?: OutputStylePromptConfig): string {
   const intro = outputStyle
     ? "You respond to the user according to the active Output Style below while using ZCode's tools and instructions."

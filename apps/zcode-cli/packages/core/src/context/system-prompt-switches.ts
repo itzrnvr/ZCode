@@ -1,4 +1,4 @@
-// System-prompt kill-switch state + custom texts.
+// System-prompt kill-switch state + custom texts + per-section overrides.
 // New file — no upstream merge conflict risk.
 //
 // Three independent global switches controlling the default prompt stack.
@@ -19,6 +19,12 @@
 //   sections) — the same path runtimeConfig.systemPrompt feeds, now settable
 //   from settings instead of only bootstrap code.
 //
+// Per-section overrides (absent/empty per key = upstream default text):
+// - sectionTexts: Record keyed by section key
+//   (cli-prefix, harness, desktop-context, dynamic-behavior, context-management).
+//   A non-empty value replaces that section's default text verbatim, so each
+//   prompt block is individually editable instead of requiring a full override.
+//
 // Wiring (single integration points, documented in CLAUDE.md):
 // - sections/identity.ts: reads getSystemPromptSwitches() before emitting the block
 // - builder.ts step 3: reads getSystemPromptSwitches() before memory section
@@ -28,12 +34,20 @@
 // Call sites read keys off getSystemPromptSwitches() directly (one shared getter,
 // three-plus call sites staying in lockstep); no per-key wrappers.
 
+export type SystemPromptSectionKey =
+  | "cli-prefix"
+  | "harness"
+  | "desktop-context"
+  | "dynamic-behavior"
+  | "context-management";
+
 export interface SystemPromptSwitches {
   securityNoticeEnabled: boolean;
   autoMemoryEnabled: boolean;
   agentsMdEnabled: boolean;
   securityNoticeText?: string;
   customText?: string;
+  sectionTexts?: Partial<Record<SystemPromptSectionKey, string>>;
 }
 
 const state: SystemPromptSwitches = {
@@ -44,6 +58,13 @@ const state: SystemPromptSwitches = {
 
 export function getSystemPromptSwitches(): SystemPromptSwitches {
   return state;
+}
+
+/** Non-empty override for one static section, or undefined when default. */
+export function getSectionTextOverride(key: SystemPromptSectionKey): string | undefined {
+  const raw = state.sectionTexts?.[key];
+  const text = raw?.trim();
+  return text ? raw : undefined;
 }
 
 export function setSystemPromptSwitches(patch: Partial<SystemPromptSwitches>): void {
@@ -68,6 +89,19 @@ export function setSystemPromptSwitches(patch: Partial<SystemPromptSwitches>): v
       delete state.customText;
     } else {
       state.customText = patch.customText;
+    }
+  }
+  if (patch.sectionTexts !== undefined) {
+    const cleaned: Partial<Record<SystemPromptSectionKey, string>> = {};
+    for (const [key, value] of Object.entries(patch.sectionTexts)) {
+      if (typeof value === "string" && value.trim()) {
+        (cleaned as Record<string, string>)[key] = value;
+      }
+    }
+    if (Object.keys(cleaned).length > 0) {
+      state.sectionTexts = { ...state.sectionTexts, ...cleaned };
+    } else if (patch.sectionTexts && Object.keys(patch.sectionTexts).length === 0) {
+      delete state.sectionTexts;
     }
   }
 }

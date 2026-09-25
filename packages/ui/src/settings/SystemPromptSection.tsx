@@ -231,15 +231,32 @@ export function SystemPromptSection({ settings, onUpdate, workspacePath }: Syste
   };
 
   const saveText =
-    (key: "systemPromptSecurityNoticeText" | "systemPromptCustomText") =>
-    async (value: string) => {
+    (
+      key:
+        | "systemPromptSecurityNoticeText"
+        | "systemPromptCustomText"
+        | "systemPromptSectionTexts",
+      sectionKey?: string,
+    ) =>
+    async (value: string | Record<string, string>) => {
       await runUserActionAsync({
         input: {
           featureId: "settings.systemPrompt",
-          action: `edit_${key}`,
+          action: `edit_${sectionKey ?? key}`,
           trigger: "keyboard",
         },
-        operation: () => onUpdate({ [key]: value }),
+        operation: () => {
+          if (key === "systemPromptSectionTexts" && typeof value === "string" && sectionKey) {
+            const current = { ...(settings?.systemPromptSectionTexts ?? {}) };
+            if (value.trim()) {
+              current[sectionKey] = value;
+            } else {
+              delete current[sectionKey];
+            }
+            return onUpdate({ systemPromptSectionTexts: current });
+          }
+          return onUpdate({ [key]: value } as Partial<AppSettings>);
+        },
         completed: { resultSource: "shared_settings" },
         failureStage: "settings_commit",
       });
@@ -302,23 +319,43 @@ export function SystemPromptSection({ settings, onUpdate, workspacePath }: Syste
         />
         <AgentsMdFiles workspacePath={workspacePath} />
       </SettingsGroupCard>
-
       <SettingsGroupCard>
         <div className="px-4 pb-1 pt-4 text-ui-base font-medium text-foreground">
           {intl.formatMessage({ id: "settings.systemPrompt.catalogTitle" })}
         </div>
-        {SYSTEM_PROMPT_SECTION_CATALOG.map((section) => (
-          <div key={section.key} className="border-t border-border px-4 py-3 first:border-t-0">
-            <div className="text-ui-base font-medium text-foreground">{section.name}</div>
-            <div className="mb-1 text-ui-sm text-foreground-subtle">{section.description}</div>
-            <div className="font-mono text-ui-sm text-foreground-subtlest">
-              {section.sourceFile}
+        {SYSTEM_PROMPT_SECTION_CATALOG.map((section) => {
+          const sectionOverride =
+            section.control === "editor" && section.defaultText
+              ? (settings?.systemPromptSectionTexts?.[section.key] ?? "")
+              : null;
+          return (
+            <div key={section.key} className="border-t border-border px-4 py-3 first:border-t-0">
+              <div className="text-ui-base font-medium text-foreground">{section.name}</div>
+              <div className="mb-1 text-ui-sm text-foreground-subtle">{section.description}</div>
+              <div className="font-mono text-ui-sm text-foreground-subtlest">
+                {section.sourceFile}
+              </div>
+              <div className="mb-2 text-ui-sm text-foreground-subtlest">
+                {section.contentSource} · {section.injection} · {section.control}
+              </div>
+              {section.control === "editor" && section.defaultText ? (
+                <TextEditor
+                  label={`${section.name} text`}
+                  description="Non-empty replaces the built-in text verbatim. Empty restores the default."
+                  value={sectionOverride ?? ""}
+                  placeholder={section.defaultText.slice(0, 120)}
+                  onSave={saveText("systemPromptSectionTexts", section.key)}
+                  testIdSuffix={`section-${section.key}`}
+                  rows={6}
+                />
+              ) : section.defaultText ? (
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-surface px-2 py-2 font-mono text-ui-sm text-foreground-subtle">
+                  {section.defaultText.slice(0, 800)}
+                </pre>
+              ) : null}
             </div>
-            <div className="text-ui-sm text-foreground-subtlest">
-              {section.contentSource} · {section.injection} · {section.control}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </SettingsGroupCard>
     </div>
   );
