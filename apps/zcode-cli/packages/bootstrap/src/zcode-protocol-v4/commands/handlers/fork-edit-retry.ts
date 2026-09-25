@@ -16,6 +16,7 @@ import {
   type TurnId,
 } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
+import { resolveEditRetryModelSelection } from "../edit-retry-live-model.js";
 import { inputIntentMetadataFromCanonical } from "../input-intent.js";
 import { startPromptTurn } from "../prompt-turn.js";
 import { commandAdmissionOf } from "../executor.js";
@@ -354,8 +355,10 @@ async function startCanonicalIntent(
       requestedDelivery: editTarget.intent.requestedDelivery,
       admittedDelivery: editTarget.intent.admittedDelivery,
       fallbackReasonCode: editTarget.intent.fallbackReasonCode,
-      modelSelection: editTarget.intent.modelSelection,
-      mode: editTarget.intent.mode,
+      // edit/retry carries no fresh user pin (UI sends target+text only); the
+      // canonical copy would otherwise resurrect the stale TurnStarted model
+      // and core persists it back into the session. Run on live selection.
+      modelSelection: resolveEditRetryModelSelection(record, editTarget.intent.modelSelection),
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,
       provenance: editTarget.intent.provenance,
