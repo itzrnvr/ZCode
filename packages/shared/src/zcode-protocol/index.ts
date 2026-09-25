@@ -1709,6 +1709,9 @@ export const zcodeSessionRuntimePreferencesResultSchema = z
     systemPromptSecurityNoticeEnabled: z.boolean().default(true),
     systemPromptAutoMemoryEnabled: z.boolean().default(true),
     systemPromptAgentsMdEnabled: z.boolean().default(true),
+    // Fork: custom prompt texts. Absent/empty = upstream default.
+    systemPromptSecurityNoticeText: z.string().max(8000).optional(),
+    systemPromptCustomText: z.string().max(20000).optional(),
     integratedTerminalShell: integratedTerminalShellSelectionSchema.optional(),
     // 兼容旧 Host：缺少字段时在协议解析边界使用当前默认策略。
     modelContextBudgetStrategy: zcodeModelContextBudgetStrategySchema.default(

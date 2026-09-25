@@ -333,6 +333,14 @@ export interface AppSettings {
   systemPromptSecurityNoticeEnabled?: boolean;
   systemPromptAutoMemoryEnabled?: boolean;
   systemPromptAgentsMdEnabled?: boolean;
+  /**
+   * Fork: custom prompt texts. Empty/absent = upstream default text.
+   * - systemPromptSecurityNoticeText: replaces SECURITY_NOTICE when non-empty.
+   * - systemPromptCustomText: full-override body wired into the existing
+   *   customSystemPrompt path (replaces stable body + skips dynamic sections).
+   */
+  systemPromptSecurityNoticeText?: string;
+  systemPromptCustomText?: string;
   onboardingOccupation?:
     | "office"
     | "developer"

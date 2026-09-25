@@ -1835,10 +1835,11 @@ export function SettingsPage({
                             />
                           </ServiceProvider>
                         ) : activeSection === "systemPrompt" ? (
-                          /* Fork: switches persist to shared settings; host prefs resolver reads them on next session. */
+                          /* Fork: switches + custom texts persist to shared settings; host prefs resolver reads them on next session. */
                           <SystemPromptSection
                             settings={sharedSettings}
                             onUpdate={updateSharedSettings}
+                            workspacePath={activeWorkspacePath ?? captionWorkspacePath ?? undefined}
                           />
                         ) : activeSection === "plugin" ? (
                           <PluginsSection

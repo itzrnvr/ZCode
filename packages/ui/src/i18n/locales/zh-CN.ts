@@ -1727,6 +1727,16 @@ const zhCN: Record<string, string> = {
   "settings.systemPrompt.agentsMd": "AGENTS.md 指令",
   "settings.systemPrompt.agentsMdHint":
     "# agentsMd 段（工作区 AGENTS.md 与项目记忆索引）。关闭后即使文件存在也移除。",
+  "settings.systemPrompt.editorsTitle": "提示词文本",
+  "settings.systemPrompt.noticeText": "安全提示文本",
+  "settings.systemPrompt.noticeTextHint":
+    "非空时替换默认拒绝说明段。清空恢复内置文本；上方开关仍可整体移除。",
+  "settings.systemPrompt.noticeTextPlaceholder": "留空使用内置提示…",
+  "settings.systemPrompt.customText": "自定义系统提示词（完全覆盖）",
+  "settings.systemPrompt.customTextHint":
+    "替换整个稳定提示词主体并跳过动态段。用于完全自定义人设。",
+  "settings.systemPrompt.customTextPlaceholder": "留空使用默认组装提示词…",
+  "settings.systemPrompt.catalogTitle": "全部提示词段落",
   "settings.memory.workspaceMemory": "工作区记忆",
   "settings.memoryDescription":
     "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",

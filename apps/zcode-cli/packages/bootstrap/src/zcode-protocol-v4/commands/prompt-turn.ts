@@ -67,6 +67,8 @@ export async function startPromptTurn(
     securityNoticeEnabled: record.systemPromptSecurityNoticeEnabled,
     autoMemoryEnabled: record.systemPromptAutoMemoryEnabled,
     agentsMdEnabled: record.systemPromptAgentsMdEnabled,
+    securityNoticeText: record.systemPromptSecurityNoticeText,
+    customText: record.systemPromptCustomText,
   });
   const usesExecutionSelection = params.modelExecution?.selectionScope === "execution";
   if (!usesExecutionSelection && record.restoreWarning) {

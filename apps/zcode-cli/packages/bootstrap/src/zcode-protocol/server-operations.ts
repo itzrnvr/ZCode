@@ -147,6 +147,9 @@ interface SessionStartupPreferences {
   systemPromptSecurityNoticeEnabled: boolean;
   systemPromptAutoMemoryEnabled: boolean;
   systemPromptAgentsMdEnabled: boolean;
+  // Fork: custom prompt texts. Absent/empty = upstream default text.
+  systemPromptSecurityNoticeText?: string;
+  systemPromptCustomText?: string;
   resolveInitialBashShellSelection: () => Promise<ExecutionShellSelection | undefined>;
 }
 
@@ -3245,6 +3248,8 @@ async function resolveSessionStartupPreferences(
       systemPromptSecurityNoticeEnabled: source.parent.systemPromptSecurityNoticeEnabled,
       systemPromptAutoMemoryEnabled: source.parent.systemPromptAutoMemoryEnabled,
       systemPromptAgentsMdEnabled: source.parent.systemPromptAgentsMdEnabled,
+      systemPromptSecurityNoticeText: source.parent.systemPromptSecurityNoticeText,
+      systemPromptCustomText: source.parent.systemPromptCustomText,
       resolveInitialBashShellSelection: async () => inheritedShellSelection,
     };
   }
@@ -3266,6 +3271,8 @@ async function resolveSessionStartupPreferences(
     systemPromptSecurityNoticeEnabled: runtimePreferences.systemPromptSecurityNoticeEnabled,
     systemPromptAutoMemoryEnabled: runtimePreferences.systemPromptAutoMemoryEnabled,
     systemPromptAgentsMdEnabled: runtimePreferences.systemPromptAgentsMdEnabled,
+    systemPromptSecurityNoticeText: runtimePreferences.systemPromptSecurityNoticeText,
+    systemPromptCustomText: runtimePreferences.systemPromptCustomText,
     resolveInitialBashShellSelection: async () => {
       const executionPreferences = await requestSessionRuntimePreferences(
         context,
@@ -3420,6 +3427,8 @@ async function createRecord(
     systemPromptSecurityNoticeEnabled: startupPreferences.systemPromptSecurityNoticeEnabled,
     systemPromptAutoMemoryEnabled: startupPreferences.systemPromptAutoMemoryEnabled,
     systemPromptAgentsMdEnabled: startupPreferences.systemPromptAgentsMdEnabled,
+    systemPromptSecurityNoticeText: startupPreferences.systemPromptSecurityNoticeText,
+    systemPromptCustomText: startupPreferences.systemPromptCustomText,
     ...(parentSessionId ? { parentSessionId } : {}),
     persistence: "persistence" in params ? (params.persistence ?? "immediate") : "immediate",
     protocolEventSequences: new Map(),

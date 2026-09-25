@@ -88,6 +88,9 @@ export interface ZCodeProtocolSessionRecord {
   systemPromptSecurityNoticeEnabled: boolean;
   systemPromptAutoMemoryEnabled: boolean;
   systemPromptAgentsMdEnabled: boolean;
+  // Fork: custom prompt texts snapshot (absent/empty = upstream default).
+  systemPromptSecurityNoticeText?: string;
+  systemPromptCustomText?: string;
   createdAt: number;
   deliveryKind?: ZCodeDeliveryKind;
   /**

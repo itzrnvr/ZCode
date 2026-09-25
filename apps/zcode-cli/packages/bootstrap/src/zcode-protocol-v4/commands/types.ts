@@ -76,6 +76,9 @@ export interface V4SessionRecordView {
   systemPromptSecurityNoticeEnabled: boolean;
   systemPromptAutoMemoryEnabled: boolean;
   systemPromptAgentsMdEnabled: boolean;
+  // Fork: custom prompt texts (absent/empty = upstream default).
+  systemPromptSecurityNoticeText?: string;
+  systemPromptCustomText?: string;
 }
 
 export interface V4CommandCoreHost {

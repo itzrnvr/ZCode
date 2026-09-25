@@ -1830,6 +1830,18 @@ const enUS: Record<string, string> = {
   "settings.systemPrompt.agentsMd": "AGENTS.md instructions",
   "settings.systemPrompt.agentsMdHint":
     "The # agentsMd section (workspace AGENTS.md plus project memory index). Turn off to drop it even when files resolve.",
+  "settings.systemPrompt.editorsTitle": "Prompt texts",
+  "settings.systemPrompt.noticeText": "Security notice text",
+  "settings.systemPrompt.noticeTextHint":
+    "Replaces the default refusal block when non-empty. Empty restores the built-in text; the switch above still removes it entirely.",
+  "settings.systemPrompt.noticeTextPlaceholder":
+    "Leave empty to use the built-in notice…",
+  "settings.systemPrompt.customText": "Custom system prompt (full override)",
+  "settings.systemPrompt.customTextHint":
+    "Replaces the whole stable prompt body and skips the dynamic stack. Use for a fully custom persona.",
+  "settings.systemPrompt.customTextPlaceholder":
+    "Leave empty for the default assembled prompt…",
+  "settings.systemPrompt.catalogTitle": "All prompt sections",
   "settings.memory.workspaceMemory": "Workspace Memory",
   "settings.memoryDescription":
     "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",

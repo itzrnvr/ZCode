@@ -86,7 +86,11 @@ export class ContextBuilder {
     const activeOutputStyle = this.config.outputStyle?.prompt.trim()
       ? this.config.outputStyle
       : undefined;
-    const customSystemPrompt = this.config.customSystemPrompt?.trim();
+    // Fork: settings custom text feeds the existing customSystemPrompt path when
+    // no explicit runtimeConfig.systemPrompt is set. Same semantics: replaces the
+    // stable body and skips the dynamic section stack.
+    const settingsCustomText = getSystemPromptSwitches().customText?.trim();
+    const customSystemPrompt = this.config.customSystemPrompt?.trim() || settingsCustomText;
     const hasCustomSystemPrompt = Boolean(customSystemPrompt);
     // 工作流子代理身份：第三条路径。与
     // customSystemPrompt 互斥——两者同在只可能是接线错误（persona 该经 workflowActor 进来，
