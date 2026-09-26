@@ -462,6 +462,15 @@ const appSettingsObjectSchema = z.object({
   onboardingOccupation: appSettingsOccupationSchema.nullish(),
   proactiveSuggestionsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().default(false),
+  // Fork: global system-prompt kill-switches. All default to full upstream stack.
+  systemPromptSecurityNoticeEnabled: z.boolean().default(true),
+  systemPromptAutoMemoryEnabled: z.boolean().default(true),
+  systemPromptAgentsMdEnabled: z.boolean().default(true),
+  // Fork: custom prompt texts. Empty/absent = upstream default.
+  systemPromptSecurityNoticeText: z.string().max(8000).optional(),
+  systemPromptCustomText: z.string().max(20000).optional(),
+  // Fork: per-section overrides. Empty values are dropped at write time; absent = default.
+  systemPromptSectionTexts: z.record(z.string(), z.string().max(20000)).optional(),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).default([]),
   lastActiveTabIndex: z.number().int().nonnegative().default(0),
   lastActiveTaskByWorkspace: z.record(z.string(), z.string()).optional(),
@@ -545,6 +554,12 @@ export const appSettingsPatchSchema = z.object({
       "other",
     ])
     .nullish(),
+  systemPromptSecurityNoticeEnabled: z.boolean().optional(),
+  systemPromptAutoMemoryEnabled: z.boolean().optional(),
+  systemPromptAgentsMdEnabled: z.boolean().optional(),
+  systemPromptSecurityNoticeText: z.string().max(8000).optional(),
+  systemPromptCustomText: z.string().max(20000).optional(),
+  systemPromptSectionTexts: z.record(z.string(), z.string().max(20000)).optional(),
   proactiveSuggestionsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).optional(),

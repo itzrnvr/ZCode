@@ -323,6 +323,30 @@ export interface AppSettings {
   nativeSearchEnhancementsEnabled?: boolean;
   /** 新建或冷恢复 Session 是否启用 Memory；默认关闭。 */
   memoryEnabled?: boolean;
+  /**
+   * Global system-prompt control (fork feature): three independent kill-switches
+   * for the default prompt stack. All default to full upstream behavior.
+   * - securityNoticeEnabled: stable identity SECURITY_NOTICE block (false removes it)
+   * - autoMemoryEnabled: entire "# Memory" section (false drops the section)
+   * - agentsMdEnabled: "# agentsMd" section (AGENTS.md + project memory index, false drops it)
+   */
+  systemPromptSecurityNoticeEnabled?: boolean;
+  systemPromptAutoMemoryEnabled?: boolean;
+  systemPromptAgentsMdEnabled?: boolean;
+  /**
+   * Fork: custom prompt texts. Empty/absent = upstream default text.
+   * - systemPromptSecurityNoticeText: replaces SECURITY_NOTICE when non-empty.
+   * - systemPromptCustomText: full-override body wired into the existing
+   *   customSystemPrompt path (replaces stable body + skips dynamic sections).
+   */
+  systemPromptSecurityNoticeText?: string;
+  systemPromptCustomText?: string;
+  /**
+   * Fork: per-section text overrides, keyed by section key
+   * (cli-prefix, harness, desktop-context, dynamic-behavior, context-management).
+   * Non-empty value replaces that section's default text verbatim.
+   */
+  systemPromptSectionTexts?: Record<string, string>;
   onboardingOccupation?:
     | "office"
     | "developer"

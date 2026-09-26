@@ -1714,6 +1714,29 @@ const zhCN: Record<string, string> = {
   "settings.nativeSearchEnhancementsDescription":
     "在新建会话或应用重启后恢复的会话中使用增强 Find 和 Grep。当前会话保持现有设置；Windows 的 Find 保持不变。",
   "settings.memory": "记忆",
+  "settings.systemPrompt": "系统提示词",
+  "settings.systemPrompt.title": "系统提示词",
+  "settings.systemPrompt.description":
+    "控制哪些默认提示词段落发送给模型。新轮次生效；开关全局有效并在重启后保留。",
+  "settings.systemPrompt.securityNotice": "安全提示",
+  "settings.systemPrompt.securityNoticeHint":
+    "稳定的拒绝说明段（授权测试与破坏性技术的边界）。关闭后将从所有提示词中移除。",
+  "settings.systemPrompt.autoMemory": "自动记忆",
+  "settings.systemPrompt.autoMemoryHint":
+    "# Memory 段（文件记忆的用法说明）。关闭后移除该段，不影响记忆存储。",
+  "settings.systemPrompt.agentsMd": "AGENTS.md 指令",
+  "settings.systemPrompt.agentsMdHint":
+    "# agentsMd 段（工作区 AGENTS.md 与项目记忆索引）。关闭后即使文件存在也移除。",
+  "settings.systemPrompt.editorsTitle": "提示词文本",
+  "settings.systemPrompt.noticeText": "安全提示文本",
+  "settings.systemPrompt.noticeTextHint":
+    "非空时替换默认拒绝说明段。清空恢复内置文本；上方开关仍可整体移除。",
+  "settings.systemPrompt.noticeTextPlaceholder": "留空使用内置提示…",
+  "settings.systemPrompt.customText": "自定义系统提示词（完全覆盖）",
+  "settings.systemPrompt.customTextHint":
+    "替换整个稳定提示词主体并跳过动态段。用于完全自定义人设。",
+  "settings.systemPrompt.customTextPlaceholder": "留空使用默认组装提示词…",
+  "settings.systemPrompt.catalogTitle": "全部提示词段落",
   "settings.memory.workspaceMemory": "工作区记忆",
   "settings.memoryDescription":
     "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",

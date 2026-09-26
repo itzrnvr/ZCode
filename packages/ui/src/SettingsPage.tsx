@@ -70,6 +70,8 @@ import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
 import { MemorySettingsSection } from "@/settings/MemorySettingsSection.js";
+// Fork: system-prompt kill-switches UI (single import line).
+import { SystemPromptSection } from "@/settings/SystemPromptSection.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
@@ -1832,6 +1834,13 @@ export function SettingsPage({
                               workspaceDisplayNames={memoryWorkspaceDisplayNames}
                             />
                           </ServiceProvider>
+                        ) : activeSection === "systemPrompt" ? (
+                          /* Fork: switches + custom texts persist to shared settings; host prefs resolver reads them on next session. */
+                          <SystemPromptSection
+                            settings={sharedSettings}
+                            onUpdate={updateSharedSettings}
+                            workspacePath={activeWorkspacePath ?? captionWorkspacePath ?? undefined}
+                          />
                         ) : activeSection === "plugin" ? (
                           <PluginsSection
                             key={`plugin:${settingsSectionNavigationVersion}`}

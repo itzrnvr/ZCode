@@ -1,5 +1,7 @@
 import type { ContextBuilderConfig, ContextSection } from "./types.js";
 import { estimateTokens } from "./utils.js";
+// Fork: per-section overrides (single import line).
+import { getSectionTextOverride } from "./system-prompt-switches.js";
 
 const COMMUNICATION_PROMPTS = {
   default:
@@ -74,6 +76,9 @@ export function buildSessionGuidanceSection(toolNames: readonly string[], hasSki
 }
 
 export function buildDynamicBehaviorSection(): ContextSection {
+  // Fork: per-section override. Non-empty settings text replaces the block verbatim.
+  const override = getSectionTextOverride("dynamic-behavior");
+  if (override) return createDynamicSection("Dynamic Behavior", "dynamic_behavior", override);
   return createDynamicSection(
     "Dynamic Behavior",
     "dynamic_behavior",
@@ -100,6 +105,9 @@ export function buildOutputStyleSection(
 }
 
 export function buildContextManagementSection(): ContextSection {
+  // Fork: per-section override. Non-empty settings text replaces the block verbatim.
+  const override = getSectionTextOverride("context-management");
+  if (override) return createDynamicSection("Context Management", "context_management", override);
   return createDynamicSection(
     "Context Management",
     "context_management",

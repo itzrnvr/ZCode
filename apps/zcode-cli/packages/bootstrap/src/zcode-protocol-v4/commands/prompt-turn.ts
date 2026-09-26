@@ -8,6 +8,8 @@ import type { TurnAttachment } from "@zcode/core";
 import type { SendInputOptions, SendInputResult } from "../../app/types.js";
 import { runWithSessionResidencyFinalization } from "../../zcode-protocol/session-residency.js";
 import type { V4CommandCoreHost, V4SessionRecordView } from "./types.js";
+// Fork: system-prompt kill-switch seeding (single import line).
+import { setSystemPromptSwitches } from "@zcode/core";
 
 interface StartPromptTurnParamsBase {
   content: string;
@@ -59,6 +61,18 @@ export async function startPromptTurn(
   record: V4SessionRecordView,
   params: StartPromptTurnParams,
 ): Promise<PromptTurnStartResult> {
+  // Fork: seed prompt switches from the session record snapshot before admission.
+  // ContextBuilder consults the same globals when assembling the prompt for this turn.
+  setSystemPromptSwitches({
+    securityNoticeEnabled: record.systemPromptSecurityNoticeEnabled,
+    autoMemoryEnabled: record.systemPromptAutoMemoryEnabled,
+    agentsMdEnabled: record.systemPromptAgentsMdEnabled,
+    securityNoticeText: record.systemPromptSecurityNoticeText,
+    customText: record.systemPromptCustomText,
+    sectionTexts: record.systemPromptSectionTexts as Partial<
+      Record<"cli-prefix" | "harness" | "desktop-context" | "dynamic-behavior" | "context-management", string>
+    >,
+  });
   const usesExecutionSelection = params.modelExecution?.selectionScope === "execution";
   if (!usesExecutionSelection && record.restoreWarning) {
     // app 重启后冷恢复可能跑在 provider registry 推送

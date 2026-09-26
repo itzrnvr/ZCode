@@ -1704,6 +1704,16 @@ export const zcodeSessionRuntimePreferencesResultSchema = z
     nativeSearchEnhancementsEnabled: z.boolean(),
     memoryEnabled: z.boolean().default(false),
     askUserQuestionAutoResolutionEnabled: z.boolean().default(true),
+    // Fork: global system-prompt kill-switches. All default true (full upstream stack).
+    // Placed on the session-materialization prefs ping so no new protocol round-trip is needed.
+    systemPromptSecurityNoticeEnabled: z.boolean().default(true),
+    systemPromptAutoMemoryEnabled: z.boolean().default(true),
+    systemPromptAgentsMdEnabled: z.boolean().default(true),
+    // Fork: custom prompt texts. Absent/empty = upstream default.
+    systemPromptSecurityNoticeText: z.string().max(8000).optional(),
+    systemPromptCustomText: z.string().max(20000).optional(),
+    // Fork: per-section overrides keyed by section key. Absent = defaults.
+    systemPromptSectionTexts: z.record(z.string(), z.string().max(20000)).optional(),
     integratedTerminalShell: integratedTerminalShellSelectionSchema.optional(),
     // 兼容旧 Host：缺少字段时在协议解析边界使用当前默认策略。
     modelContextBudgetStrategy: zcodeModelContextBudgetStrategySchema.default(
