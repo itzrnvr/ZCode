@@ -402,32 +402,35 @@ export function registerDeepLinkProtocol(
   },
   options: { iconPath?: string } = {},
 ) {
-  const scheme = "zcode";
-
-  if (process.defaultApp && process.argv.length >= 2) {
-    const entry = resolve(process.argv[1]!);
-    const ok = app.setAsDefaultProtocolClient(scheme, process.execPath, [entry]);
-    if (!ok) {
-      logger.warn("[deep-link] 注册协议失败（defaultApp）", {
-        scheme,
-        execPath: process.execPath,
-        entry: process.argv[1],
-      });
-    } else {
-      logger.info("[deep-link] 注册协议成功（defaultApp）", {
-        scheme,
-        execPath: process.execPath,
-        entry: process.argv[1],
-      });
+  // Fork: Blackbird registers blackbird:// as its own scheme and keeps
+  // zcode:// so old share/workspace links still open here too.
+  const schemes = process.env.ZCODE_FORK_IDENTITY === "blackbird" ? ["blackbird", "zcode"] : ["zcode"];
+  for (const scheme of schemes) {
+    if (process.defaultApp && process.argv.length >= 2) {
+      const entry = resolve(process.argv[1]!);
+      const ok = app.setAsDefaultProtocolClient(scheme, process.execPath, [entry]);
+      if (!ok) {
+        logger.warn("[deep-link] 注册协议失败（defaultApp）", {
+          scheme,
+          execPath: process.execPath,
+          entry: process.argv[1],
+        });
+      } else {
+        logger.info("[deep-link] 注册协议成功（defaultApp）", {
+          scheme,
+          execPath: process.execPath,
+          entry: process.argv[1],
+        });
+      }
+      continue;
     }
-    return;
-  }
 
-  const ok = app.setAsDefaultProtocolClient(scheme);
-  if (!ok) {
-    logger.warn("[deep-link] 注册协议失败", { scheme });
-  } else {
-    logger.info("[deep-link] 注册协议成功", { scheme });
+    const ok = app.setAsDefaultProtocolClient(scheme);
+    if (!ok) {
+      logger.warn("[deep-link] 注册协议失败", { scheme });
+    } else {
+      logger.info("[deep-link] 注册协议成功", { scheme });
+    }
   }
 
   if (process.platform === "linux" && app.isPackaged) {
