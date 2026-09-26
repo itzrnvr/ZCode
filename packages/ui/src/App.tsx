@@ -47,7 +47,11 @@ import {
 } from "@/lib/settingsNavigation.js";
 import { runWorkspaceVisibleCommand } from "@/lib/workspaceVisibleCommand.js";
 import { ZCODE_PRODUCT_DOCS_URL } from "@/lib/productDocs.js";
+// Fork: Blackbird titlebar/sidebar mark. Same import shape; flavor decides the file.
 import appLogoUrl from "@/assets/provider-icons/logo-zai.svg";
+import blackbirdLogoUrl from "@/assets/provider-icons/logo-blackbird.svg";
+import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
+const resolvedAppLogoUrl = ZCODE_PRODUCT_FLAVOR === "blackbird" ? blackbirdLogoUrl : appLogoUrl;
 import { resolveTheme } from "@/useTheme.js";
 import { WorkspaceShellLayout } from "@/app-shell/WorkspaceShellLayout.js";
 import { useAppChromeState } from "@/app-shell/useAppChromeState.js";
@@ -1223,7 +1227,7 @@ export function App({
         fileChangeFindNavigationRequestId={fileChangeFindState.navigationRequestId}
         fileChangeFindQuery={fileChangeFindState.query}
         onFileChangeFindMatchCountChange={setFileChangeFindMatchCount}
-        appLogoUrl={appLogoUrl}
+        appLogoUrl={resolvedAppLogoUrl}
         platform={platform}
         reloadSessionDisabled={reloadSessionDisabled}
         reloadSessionPending={reloadSessionPending}

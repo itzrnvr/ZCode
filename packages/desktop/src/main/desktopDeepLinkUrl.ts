@@ -1,5 +1,10 @@
-const DEEP_LINK_SCHEME = "zcode";
-const DEEP_LINK_RE = /\bzcode:(?:\/\/|\/)?[^\s"'<>]+/i;
+// Fork: Blackbird accepts both blackbird:// and zcode:// deep links so old
+// share/workspace URLs keep working; new links should use blackbird://.
+const DEEP_LINK_SCHEME_BY_PROTOCOL: Record<string, true> = {
+  "zcode:": true,
+  "blackbird:": true,
+};
+const DEEP_LINK_RE = /\b(?:zcode|blackbird):(?:\/\/|\/)?[^\s"'<>]+/i;
 const OAUTH_CALLBACK_HOSTS = new Set(["oauth"]);
 const PAYMENT_CALLBACK_HOST = "payment";
 const WORKSPACE_OPEN_HOST = "workspace";
@@ -15,7 +20,7 @@ function normalizeOAuthCallbackPath(pathname: string): string {
 }
 
 export function isOAuthCallbackUrl(parsedUrl: URL): boolean {
-  if (parsedUrl.protocol !== `${DEEP_LINK_SCHEME}:`) {
+  if (DEEP_LINK_SCHEME_BY_PROTOCOL[parsedUrl.protocol] !== true) {
     return false;
   }
 
@@ -35,7 +40,7 @@ export function isOAuthCallbackUrl(parsedUrl: URL): boolean {
 }
 
 export function isPaymentCallbackUrl(parsedUrl: URL): boolean {
-  if (parsedUrl.protocol !== `${DEEP_LINK_SCHEME}:`) {
+  if (DEEP_LINK_SCHEME_BY_PROTOCOL[parsedUrl.protocol] !== true) {
     return false;
   }
 
@@ -53,7 +58,7 @@ export function isPaymentCallbackUrl(parsedUrl: URL): boolean {
 }
 
 export function isWorkspaceOpenUrl(parsedUrl: URL): boolean {
-  if (parsedUrl.protocol !== `${DEEP_LINK_SCHEME}:`) {
+  if (DEEP_LINK_SCHEME_BY_PROTOCOL[parsedUrl.protocol] !== true) {
     return false;
   }
 
@@ -81,7 +86,7 @@ export function extractWorkspaceOpenPath(parsedUrl: URL): string | null {
 
 export function isShareImportUrl(parsedUrl: URL): boolean {
   return (
-    parsedUrl.protocol === `${DEEP_LINK_SCHEME}:` &&
+    DEEP_LINK_SCHEME_BY_PROTOCOL[parsedUrl.protocol] === true &&
     parsedUrl.hostname === SHARE_IMPORT_HOST &&
     normalizeOAuthCallbackPath(parsedUrl.pathname) === "/import"
   );

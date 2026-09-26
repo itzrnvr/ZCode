@@ -39,9 +39,19 @@ export function getDataBaseDir(): string {
   return defaultDataBaseDir;
 }
 
-/** {dataBaseDir}/.zcode */
+/**
+ * Fork: Blackbird uses its own `~/.blackbird` data root so it installs
+ * side-by-side with stock ZCode without sharing sessions, settings, or
+ * memory. Selected at runtime via `ZCODE_FORK_IDENTITY=blackbird` (baked
+ * into packaged builds); everything downstream keys off this one function.
+ */
+export function getZCodeDataDirName(): string {
+  return process.env.ZCODE_FORK_IDENTITY?.trim() === "blackbird" ? ".blackbird" : ".zcode";
+}
+
+/** {dataBaseDir}/.zcode (or .blackbird for the fork) */
 export function getZCodeDataRootDir(): string {
-  return join(getDataBaseDir(), ".zcode");
+  return join(getDataBaseDir(), getZCodeDataDirName());
 }
 
 /** 非项目对话共享的真实工作目录；默认 ~/.zcode/workspace/default。 */

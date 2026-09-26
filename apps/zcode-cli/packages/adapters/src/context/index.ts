@@ -234,7 +234,9 @@ async function findDefaultUserInstructionFile(
     return undefined;
   }
 
-  const filePath = join(resolveUserHomeDir(env), ".zcode", "AGENTS.md");
+  // Fork: Blackbird reads ~/.blackbird/AGENTS.md so user instructions stay side-by-side.
+  const dirName = env.ZCODE_FORK_IDENTITY?.trim() === "blackbird" ? ".blackbird" : ".zcode";
+  const filePath = join(resolveUserHomeDir(env), dirName, "AGENTS.md");
   if (await isFile(filePath)) {
     return { filePath, fileName: "AGENTS.md" };
   }

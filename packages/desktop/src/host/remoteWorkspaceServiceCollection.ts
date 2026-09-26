@@ -267,6 +267,30 @@ export function createRemoteWorkspaceServiceCollection(params: {
               nativeSearchEnhancementsEnabled: settings.nativeSearchEnhancementsEnabled !== false,
               memoryEnabled: settings.memoryEnabled === true,
               modelContextBudgetStrategy,
+              // Fork: system-prompt switches ride the same prefs ping (remote host path).
+              systemPromptSecurityNoticeEnabled:
+                settings.systemPromptSecurityNoticeEnabled !== false,
+              systemPromptAutoMemoryEnabled: settings.systemPromptAutoMemoryEnabled !== false,
+              systemPromptAgentsMdEnabled: settings.systemPromptAgentsMdEnabled !== false,
+              ...(settings.systemPromptSecurityNoticeText?.trim()
+                ? { systemPromptSecurityNoticeText: settings.systemPromptSecurityNoticeText }
+                : {}),
+              ...(settings.systemPromptCustomText?.trim()
+                ? { systemPromptCustomText: settings.systemPromptCustomText }
+                : {}),
+              ...(settings.systemPromptSectionTexts &&
+              Object.values(settings.systemPromptSectionTexts).some(
+                (v): v is string => typeof v === "string" && v.trim().length > 0,
+              )
+                ? {
+                    systemPromptSectionTexts: Object.fromEntries(
+                      Object.entries(settings.systemPromptSectionTexts).filter(
+                        (entry): entry is [string, string] =>
+                          typeof entry[1] === "string" && entry[1].trim().length > 0,
+                      ),
+                    ),
+                  }
+                : {}),
               // remote workspace 与本地 Host 保持同一 scope 边界，首次执行不得再次等待 client config。
               ...(request.scope === "user-execution" && settings.integratedTerminalShell
                 ? { integratedTerminalShell: settings.integratedTerminalShell }

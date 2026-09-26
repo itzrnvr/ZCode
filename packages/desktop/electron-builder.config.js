@@ -477,6 +477,10 @@ export default {
     mirror: resolveElectronDownloadMirror(),
   },
   productName: desktopProductIdentity.productName,
+  // Fork: Blackbird uses its own icon set under build/blackbird/ so stock
+  // assets stay untouched. electron-builder resolves per-platform extensions
+  // (.icns/.ico) from this base path; only the directory prefix switches.
+  icon: desktopProductIdentity.flavor === "blackbird" ? "build/blackbird/icon" : "build/icon",
   directories: {
     // macOS arm64/x64 CI 可能共享同一个 checkout 并行打包。
     // 输出根目录允许按架构隔离，避免一个 job 清理 dist 时删除另一个 job 正在签名的 .app。
@@ -592,21 +596,30 @@ export default {
     },
     {
       // 应用图标：打包后放入 resources 目录，主进程通过 process.resourcesPath 加载
-      from: "build/icon.png",
+      from:
+        desktopProductIdentity.flavor === "blackbird" ? "build/blackbird/icon.png" : "build/icon.png",
       to: "icon.png",
     },
     ...(targetPlatform.os === "linux"
       ? [
           {
             // AppImage 用户级 hicolor 图标安装使用真实 512x512 资源，避免目录标称尺寸和 PNG IHDR 不一致。
-            from: "build/icons/512x512.png",
+            // Fork: Blackbird hicolor icon follows the same flavor switch.
+            from:
+              desktopProductIdentity.flavor === "blackbird"
+                ? "build/blackbird/icons/512x512.png"
+                : "build/icons/512x512.png",
             to: "icon_512x512.png",
           },
         ]
       : []),
     {
       // Windows 独立图标：开发态和打包态都统一走同一套任务栏/窗口图标资源。
-      from: "build/icon_windows.png",
+      // Fork: Blackbird window icon follows the same flavor switch.
+      from:
+        desktopProductIdentity.flavor === "blackbird"
+          ? "build/blackbird/icon_windows.png"
+          : "build/icon_windows.png",
       to: "icon_windows.png",
     },
     ...(targetPlatform.os === "win32"
@@ -614,7 +627,11 @@ export default {
           {
             // Windows 托盘图标：Tray 在打包态只能稳定读取 resources 下的独立资源。
             // 这里不复用窗口 PNG，避免通知区域在高 DPI 下退化成模糊缩放图。
-            from: "build/icon.ico",
+            // Fork: Blackbird tray icon follows the same flavor switch.
+            from:
+              desktopProductIdentity.flavor === "blackbird"
+                ? "build/blackbird/icon.ico"
+                : "build/icon.ico",
             to: "tray_icon.ico",
           },
         ]
@@ -646,12 +663,15 @@ export default {
   // 打包阶段统一复用安装时准备好的原生文件，避免 electron-builder 再触发一轮不受控的本地编译。
   npmRebuild: false,
   // OAuth deep link 协议注册（macOS 打包后需要 Info.plist 中声明 CFBundleURLTypes）
+  // Fork: Blackbird 声明自己的 blackbird:// scheme；保留 zcode:// 兼容旧链接。
+  // 两个 scheme 共存，旧分享链接继续可用，新链接用 blackbird://。
   protocols: [
     {
       // 协议处理器的展示名之前使用小写 scheme，打包产物里的协议描述无法体现产品名。
       // 展示名跟随安装包身份；scheme 仍保持 zcode，因此两个应用中最后注册者会成为默认 handler。
       name: desktopProductIdentity.productName,
-      schemes: ["zcode"],
+      schemes:
+        desktopProductIdentity.flavor === "blackbird" ? ["blackbird", "zcode"] : ["zcode"],
     },
   ],
   mac: {
@@ -735,7 +755,11 @@ export default {
     // 使用自定义安装背景图。
     background: "build/dmg_background.png",
     // 安装盘图标统一使用安装专用素材，避免复用应用图标导致安装识别度不足。
-    icon: "build/icon_installer.icns",
+    // Fork: Blackbird installer art follows the same flavor switch.
+    icon:
+      desktopProductIdentity.flavor === "blackbird"
+        ? "build/blackbird/icon_installer.icns"
+        : "build/icon_installer.icns",
     contents: [
       // 实验性调整：为隐藏资源文件显式指定图标坐标，尽量把它们移到角落区域。
       { x: 640, y: 56, type: "file", path: ".background.tiff" },
@@ -748,9 +772,19 @@ export default {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
     // Windows 安装流程使用独立安装图标，和应用运行时图标解耦。
-    installerIcon: "build/icon_installer.ico",
-    uninstallerIcon: "build/icon_installer.ico",
-    installerHeaderIcon: "build/icon_installer.ico",
+    // Fork: Blackbird installer art follows the same flavor switch.
+    installerIcon:
+      desktopProductIdentity.flavor === "blackbird"
+        ? "build/blackbird/icon_installer.ico"
+        : "build/icon_installer.ico",
+    uninstallerIcon:
+      desktopProductIdentity.flavor === "blackbird"
+        ? "build/blackbird/icon_installer.ico"
+        : "build/icon_installer.ico",
+    installerHeaderIcon:
+      desktopProductIdentity.flavor === "blackbird"
+        ? "build/blackbird/icon_installer.ico"
+        : "build/icon_installer.ico",
   },
   detectUpdateChannel: false,
   publish: {

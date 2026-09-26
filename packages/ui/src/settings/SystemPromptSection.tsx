@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { TID_SETTINGS_SYSTEM_PROMPT_SWITCH } from "@zcode/shared";
+import { TID_SETTINGS_SYSTEM_PROMPT_SWITCH, ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
 import { runUserActionAsync } from "@/lib/userActionTelemetry.js";
 import { Switch } from "@/components/ui/switch.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -153,10 +153,12 @@ function AgentsMdFiles({ workspacePath }: { workspacePath?: string }) {
     [],
   );
   const [loading, setLoading] = useState(false);
-  const candidates = [
-    workspacePath ? `${workspacePath}/AGENTS.md` : null,
-    "~/.zcode/AGENTS.md",
-  ].filter((p): p is string => Boolean(p));
+  // Fork: Blackbird preview reads ~/.blackbird/AGENTS.md. Renderer knows its
+  // own flavor via the shared ZCODE_PRODUCT_FLAVOR define — no process.env read.
+  const userAgentsMd = ZCODE_PRODUCT_FLAVOR === "blackbird" ? "~/.blackbird/AGENTS.md" : "~/.zcode/AGENTS.md";
+  const candidates = [workspacePath ? `${workspacePath}/AGENTS.md` : null, userAgentsMd].filter(
+    (p): p is string => Boolean(p),
+  );
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
