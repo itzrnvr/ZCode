@@ -1,5 +1,9 @@
 import { PanelLeftOpen } from "lucide-react";
+// Fork: Blackbird collapsed-rail mark follows the same flavor gate as App.
 import appLogoUrl from "@/assets/provider-icons/logo-zai.svg";
+import blackbirdLogoUrl from "@/assets/provider-icons/logo-blackbird.svg";
+import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
+const resolvedRailLogoUrl = ZCODE_PRODUCT_FLAVOR === "blackbird" ? blackbirdLogoUrl : appLogoUrl;
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -33,7 +37,7 @@ export function WorkspaceSidebarCollapsedRail({
               })}
             >
               <img
-                src={appLogoUrl}
+                src={resolvedRailLogoUrl}
                 alt="ZCode"
                 className="size-5 transition-opacity group-hover:opacity-0"
                 draggable={false}
