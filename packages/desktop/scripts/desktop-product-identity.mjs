@@ -23,13 +23,50 @@ const PREVIEW_IDENTITY = Object.freeze({
   cuaHelperInstallVariant: "preview",
 });
 
+/**
+ * Fork identity: Blackbird installs side-by-side with stock ZCode and ZCode
+ * Preview via its own appId/productName/exe/data-dir. Enabled with
+ * `ZCODE_FORK_IDENTITY=blackbird`. Any other non-empty value fails the build
+ * rather than silently shipping a misbranded package.
+ */
+export const ZCODE_FORK_IDENTITY_ENV = "ZCODE_FORK_IDENTITY";
+export const ZCODE_FORK_IDENTITY_BLACKBIRD = "blackbird";
+
+const BLACKBIRD_IDENTITY = Object.freeze({
+  flavor: "blackbird",
+  appId: "dev.blackbird.app",
+  productName: "Blackbird",
+  linuxExecutableName: "blackbird",
+  linuxPackageName: "blackbird",
+  cuaHelperInstallVariant: "blackbird",
+});
+
 export const desktopProductIdentities = Object.freeze({
   production: PRODUCTION_IDENTITY,
   preview: PREVIEW_IDENTITY,
+  blackbird: BLACKBIRD_IDENTITY,
 });
 
 function normalizeDesktopZCodeEnv(env) {
   return env.ZCODE_ENV?.trim().toLowerCase() === "production" ? "production" : "test";
+}
+
+/**
+ * Fork identity check: `ZCODE_FORK_IDENTITY=blackbird` selects the Blackbird
+ * flavor. Empty = off. Anything else fails the build rather than shipping a
+ * misbranded package.
+ */
+export function isForkIdentityRequested(env = process.env) {
+  const value = env[ZCODE_FORK_IDENTITY_ENV]?.trim() ?? "";
+  if (value === "") {
+    return false;
+  }
+  if (value === ZCODE_FORK_IDENTITY_BLACKBIRD) {
+    return true;
+  }
+  throw new Error(
+    `invalid ${ZCODE_FORK_IDENTITY_ENV}=${value}; expected "blackbird" or empty`,
+  );
 }
 
 /**
@@ -46,7 +83,7 @@ export function isPreviewIdentityRequested(env = process.env) {
     return false;
   }
   throw new Error(
-    `invalid ${ZCODE_PREVIEW_IDENTITY_ENV}=${env[ZCODE_PREVIEW_IDENTITY_ENV]}; expected 1 or 0`,
+    `invalid {ZCODE_PREVIEW_IDENTITY_ENV}={env[ZCODE_PREVIEW_IDENTITY_ENV]}; expected 1 or 0`,
   );
 }
 
@@ -57,6 +94,10 @@ export function isPreviewIdentityRequested(env = process.env) {
  * 未知 `ZCODE_ENV` 继续按 test 处理，和共享层 normalizeZCodeEnv 的 fail-safe 默认值一致。
  */
 export function resolveDesktopProductFlavor(env = process.env) {
+  // Fork wins over everything: Blackbird is its own product, never a ZCode variant.
+  if (isForkIdentityRequested(env)) {
+    return "blackbird";
+  }
   if (isPreviewIdentityRequested(env)) {
     return "preview";
   }
@@ -86,6 +127,7 @@ export function resolveWindowsAppUserModelIdForFlavor(flavor, runtime = { isPack
   if (runtime.isPackaged === false) {
     return "cn.aminer.zcode";
   }
+  if (flavor === "blackbird") return desktopProductIdentities.blackbird.appId;
   return desktopProductIdentities[flavor === "preview" ? "preview" : "production"].appId;
 }
 

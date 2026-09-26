@@ -646,12 +646,15 @@ export default {
   // 打包阶段统一复用安装时准备好的原生文件，避免 electron-builder 再触发一轮不受控的本地编译。
   npmRebuild: false,
   // OAuth deep link 协议注册（macOS 打包后需要 Info.plist 中声明 CFBundleURLTypes）
+  // Fork: Blackbird 声明自己的 blackbird:// scheme；保留 zcode:// 兼容旧链接。
+  // 两个 scheme 共存，旧分享链接继续可用，新链接用 blackbird://。
   protocols: [
     {
       // 协议处理器的展示名之前使用小写 scheme，打包产物里的协议描述无法体现产品名。
       // 展示名跟随安装包身份；scheme 仍保持 zcode，因此两个应用中最后注册者会成为默认 handler。
       name: desktopProductIdentity.productName,
-      schemes: ["zcode"],
+      schemes:
+        desktopProductIdentity.flavor === "blackbird" ? ["blackbird", "zcode"] : ["zcode"],
     },
   ],
   mac: {
