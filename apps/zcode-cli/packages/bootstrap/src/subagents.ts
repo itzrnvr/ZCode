@@ -317,6 +317,15 @@ function isDisabledUserProfile(
   );
 }
 
+/**
+ * 依赖目录与 VCS 元数据里不会有 agent profile 的 Markdown；用户 agent 根下经常
+ * 带着 node_modules（实测 ~/.zcode/agents/claude-code/node_modules 里 8000+ 个
+ * README/LICENSE.md），逐个当 profile 解析既拖慢每次冷启动（约 1s），又刷出
+ * 大量 missing_frontmatter 诊断。目录名匹配即跳过，符号链接目录本就不在
+ * withFileTypes 的 isDirectory() 命中范围内。
+ */
+const SKIPPED_PROFILE_DIR_NAMES: Record<string, true> = { node_modules: true, ".git": true };
+
 function listMarkdownFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   if (!statSync(root).isDirectory()) return [];
@@ -325,6 +334,7 @@ function listMarkdownFiles(root: string): string[] {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
+      if (SKIPPED_PROFILE_DIR_NAMES[entry.name]) continue;
       result.push(...listMarkdownFiles(path));
       continue;
     }
