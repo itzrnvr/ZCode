@@ -122,3 +122,31 @@ export function hexToHsv(value: string): Hsv | null {
 export function hsvToHex(hsv: Hsv): string {
   return rgbToHex(hsvToRgb(hsv));
 }
+
+/**
+ * 任意 CSS 颜色 → #rrggbb（拿不到颜色空间信息时返回 null）。
+ *
+ * 主题 Token 的计算值可能是 `rgb()`、`oklch()` 或 color-mix 的结果，
+ * 字符串解析要跟着色彩空间走；交给一次离屏绘制最稳妥。
+ */
+export function cssColorToHex(value: string): string | null {
+  if (typeof document === "undefined" || typeof CSS === "undefined" || !CSS.supports?.("color", value)) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+  context.fillStyle = value;
+  context.fillRect(0, 0, 1, 1);
+  const data = context.getImageData(0, 0, 1, 1).data;
+  // 透明色没有可编辑的实体颜色，交给调用方决定回退值。
+  if ((data[3] ?? 255) === 0) {
+    return null;
+  }
+  return rgbToHex({ r: data[0] ?? 0, g: data[1] ?? 0, b: data[2] ?? 0 });
+}

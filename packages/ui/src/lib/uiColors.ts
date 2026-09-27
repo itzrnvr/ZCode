@@ -1,4 +1,5 @@
 import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
+import { cssColorToHex } from "./colorModels.js";
 
 export const UI_COLORS_STORAGE_KEY = "zcode-ui-colors";
 
@@ -110,15 +111,21 @@ export function subscribeToUiColorsStorageChanges(): () => void {
 
 /**
  * Token 当前生效色的十六进制值（未覆盖时即主题解析值），供取色器作为起点。
- * 变量由 styles.css 声明为字面 hex，因此读到的就是编辑器可编辑的形态。
+ *
+ * 不能直接读根节点的变量：Token 多为 `var(--color-neutral-*)` 这类链，
+ * 计算值会序列化成 oklch()/color-mix() 而不是 hex。这里让探针元素实际取一次色，
+ * 再按绘制结果归一化，任何色彩空间都能落到 #rrggbb。
  */
 export function readUiColorToken(field: UiColorField, fallback = "#000000"): string {
   if (typeof document === "undefined") {
     return fallback;
   }
 
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue(UI_COLOR_TOKENS[field])
-    .trim();
-  return normalizeUiColor(raw) ?? fallback;
+  const probe = document.createElement("div");
+  probe.style.cssText = `position:fixed;left:-9999px;top:0;width:1px;height:1px;background-color:var(${UI_COLOR_TOKENS[field]})`;
+  document.body.append(probe);
+  const painted = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+
+  return normalizeUiColor(painted) ?? cssColorToHex(painted) ?? fallback;
 }
