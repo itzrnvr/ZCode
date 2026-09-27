@@ -91,6 +91,11 @@ export {
   loadUiColors,
   subscribeToUiColorsStorageChanges,
 } from "./lib/uiColors.js";
+export {
+  applyPointerCursors,
+  loadPointerCursors,
+  subscribeToPointerCursorsStorageChanges,
+} from "./lib/pointerCursors.js";
 export { reportUiLaunchToInput } from "./lib/uiPerfArmsTelemetry.js";
 export {
   RendererUserActionTelemetry,

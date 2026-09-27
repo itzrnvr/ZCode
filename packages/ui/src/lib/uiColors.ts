@@ -10,6 +10,7 @@ export const UI_COLORS_STORAGE_KEY = "zcode-ui-colors";
 export const UI_COLOR_TOKENS = {
   accent: "--color-brand",
   background: "--color-background",
+  foreground: "--color-foreground",
   sidebar: "--color-sidebar",
   card: "--color-card",
 } as const;

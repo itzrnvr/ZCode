@@ -1,9 +1,7 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { BundledTheme } from "shiki";
-import { CodeBlock } from "@/components/ai-elements/code-block.js";
 import { Card, CardContent } from "@/components/ui/card.js";
-import { CODE_PREVIEW_THEME_OPTIONS, SETTINGS_PREVIEW_CODE } from "@/lib/codePreviewPreferences.js";
-import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { CODE_PREVIEW_THEME_OPTIONS } from "@/lib/codePreviewPreferences.js";
 import {
   Select,
   SelectContent,
@@ -41,68 +39,6 @@ export function ThemeSelect({
         ))}
       </SelectContent>
     </Select>
-  );
-}
-
-export function ThemePreviewCard({
-  mode,
-  title,
-  themeName,
-  theme,
-  isActive,
-  showLineNumbers,
-  wrapLongLines,
-  fontSizePx,
-}: {
-  mode: "light" | "dark";
-  title: string;
-  themeName: string;
-  theme: BundledTheme;
-  isActive: boolean;
-  showLineNumbers: boolean;
-  wrapLongLines: boolean;
-  fontSizePx: number;
-}) {
-  const { intl } = useZCodeIntl();
-  const previewSurfaceClassName = mode === "light" ? "ring-1 ring-black/5" : "ring-1 ring-white/8";
-  const previewThemeStyle = {
-    "--color-background": mode === "light" ? "#f8f8f8" : "#161616",
-    "--color-card": mode === "light" ? "#f8f8f8" : "#161616",
-    "--color-foreground": mode === "light" ? "#0d0d0d" : "#ffffff",
-  } as CSSProperties;
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <div className="text-ui-base font-semibold text-foreground">{title}</div>
-          <div className="text-ui-base text-foreground-subtle">{themeName}</div>
-        </div>
-        <span
-          className={`rounded-md px-2.5 py-1 text-ui-xs font-medium ${
-            isActive ? "bg-selected text-foreground" : "bg-surface text-foreground-subtle"
-          }`}
-        >
-          {intl.formatMessage({
-            id: isActive ? "settings.previewBadge.active" : `settings.previewBadge.${mode}`,
-          })}
-        </span>
-      </div>
-      <div className="p-2">
-        <CodeBlock
-          code={SETTINGS_PREVIEW_CODE}
-          language="typescript"
-          theme={theme}
-          showLineNumbers={showLineNumbers}
-          wrapLongLines={wrapLongLines}
-          fontSizePx={fontSizePx}
-          // Light/Dark Preview 是预览目标主题，不应继承当前应用主题的 background token。
-          // CodeBlock 内部会把 @pierre/diffs 背景映射到 card，这里同时固定 background/card。
-          className={`overflow-hidden border-0 bg-background ${previewSurfaceClassName}`}
-          style={previewThemeStyle}
-        />
-      </div>
-    </div>
   );
 }
 

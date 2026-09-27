@@ -25,6 +25,12 @@ import {
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
 import { applyUiFontSizePx, loadUiFontSizePx, writeUiFontSizePx } from "@/lib/uiFontSize.js";
+import {
+  applyPointerCursors,
+  loadPointerCursors,
+  normalizePointerCursors,
+  writePointerCursors,
+} from "@/lib/pointerCursors.js";
 import { applyUiColors, loadUiColors, writeUiColors, type UiColors } from "@/lib/uiColors.js";
 import {
   isTaskNotificationEnabled,
@@ -120,6 +126,10 @@ export interface ZCodeState {
   uiColors: UiColors;
   setUiColors: (uiColors: UiColors) => void;
 
+  /** 可点击元素是否使用手型光标 */
+  pointerCursors: boolean;
+  setPointerCursors: (enabled: boolean) => void;
+
   /** 是否启用性能模式 */
   performanceMode: boolean;
   setPerformanceMode: (enabled: boolean) => void;
@@ -211,9 +221,22 @@ export interface ZCodeState {
 // 需要广播的字段 —— 只有这些字段的变更会发送给其他窗口
 // ============================================================================
 
-const BROADCAST_FIELDS = new Set(["theme", "locale", "uiFontSizePx", "uiColors", "interfaceMode"]);
+const BROADCAST_FIELDS = new Set([
+  "theme",
+  "locale",
+  "uiFontSizePx",
+  "uiColors",
+  "pointerCursors",
+  "interfaceMode",
+]);
 
-type BroadcastField = "theme" | "locale" | "uiFontSizePx" | "uiColors" | "interfaceMode";
+type BroadcastField =
+  | "theme"
+  | "locale"
+  | "uiFontSizePx"
+  | "uiColors"
+  | "pointerCursors"
+  | "interfaceMode";
 
 /** 广播频道名前缀 */
 const STATE_CHANNEL_PREFIX = "state:";
@@ -293,6 +316,11 @@ export function createZCodeStore(
     uiColors: loadUiColors(),
     setUiColors: (uiColors: UiColors) => {
       set({ uiColors: writeUiColors(uiColors) });
+    },
+
+    pointerCursors: loadPointerCursors(),
+    setPointerCursors: (enabled: boolean) => {
+      set({ pointerCursors: writePointerCursors(enabled) });
     },
 
     performanceMode: loadPerformanceMode(),
@@ -486,6 +514,8 @@ export function createZCodeStore(
         state.setUiFontSizePx(msg.payload);
       } else if (field === "uiColors") {
         state.setUiColors(msg.payload as UiColors);
+      } else if (field === "pointerCursors") {
+        state.setPointerCursors(normalizePointerCursors(msg.payload));
       }
     } finally {
       applyingBroadcast = false;
@@ -496,6 +526,7 @@ export function createZCodeStore(
   applyTheme(useStore.getState().theme);
   applyUiFontSizePx(useStore.getState().uiFontSizePx);
   applyUiColors(useStore.getState().uiColors);
+  applyPointerCursors(useStore.getState().pointerCursors);
   document.documentElement.classList.toggle(
     "dark",
     resolveTheme(useStore.getState().theme) === "dark",

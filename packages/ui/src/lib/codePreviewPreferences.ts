@@ -32,10 +32,16 @@ export function isDarkCodePreviewTheme(theme: BundledTheme): boolean {
   return DARK_CODE_PREVIEW_THEMES.includes(theme);
 }
 
-export const SETTINGS_PREVIEW_CODE = `const themePreview: ThemeConfig = {
+export const SETTINGS_PREVIEW_CODE_LIGHT = `const themePreview: ThemeConfig = {
   surface: "sidebar",
-  accent: "#339CFF",
-  contrast: 45,
+  accent: "#2563eb",
+  contrast: 42,
+};`;
+
+export const SETTINGS_PREVIEW_CODE_DARK = `const themePreview: ThemeConfig = {
+  surface: "sidebar-elevated",
+  accent: "#0ea5e9",
+  contrast: 68,
 };`;
 
 export function getCodePreviewTheme(
