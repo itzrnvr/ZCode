@@ -24,19 +24,8 @@ import {
 } from "@/store/codingPlanQuotaResetState.js";
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
-import {
-  applyUiFontSizePx,
-  loadUiFontSizePx,
-  normalizeUiFontSizePx,
-  UI_FONT_SIZE_STORAGE_KEY,
-} from "@/lib/uiFontSize.js";
-import {
-  applyUiColors,
-  loadUiColors,
-  normalizeUiColors,
-  UI_COLORS_STORAGE_KEY,
-  type UiColors,
-} from "@/lib/uiColors.js";
+import { applyUiFontSizePx, loadUiFontSizePx, writeUiFontSizePx } from "@/lib/uiFontSize.js";
+import { applyUiColors, loadUiColors, writeUiColors, type UiColors } from "@/lib/uiColors.js";
 import {
   isTaskNotificationEnabled,
   isTaskNotificationSoundPreferenceEnabled,
@@ -298,19 +287,12 @@ export function createZCodeStore(
 
     uiFontSizePx: loadUiFontSizePx(),
     setUiFontSizePx: (fontSizePx: number) => {
-      const normalizedFontSizePx = normalizeUiFontSizePx(fontSizePx);
-      writeSafeLocalStorage(UI_FONT_SIZE_STORAGE_KEY, String(normalizedFontSizePx));
-      applyUiFontSizePx(normalizedFontSizePx);
-      set({ uiFontSizePx: normalizedFontSizePx });
+      set({ uiFontSizePx: writeUiFontSizePx(fontSizePx) });
     },
 
     uiColors: loadUiColors(),
     setUiColors: (uiColors: UiColors) => {
-      // 整体替换而不是合并：重置（清空）字段也要能广播出去，接收窗口不会残留旧覆盖。
-      const normalizedUiColors = normalizeUiColors(uiColors);
-      writeSafeLocalStorage(UI_COLORS_STORAGE_KEY, JSON.stringify(normalizedUiColors));
-      applyUiColors(normalizedUiColors);
-      set({ uiColors: normalizedUiColors });
+      set({ uiColors: writeUiColors(uiColors) });
     },
 
     performanceMode: loadPerformanceMode(),
@@ -503,7 +485,7 @@ export function createZCodeStore(
       } else if (field === "uiFontSizePx" && typeof msg.payload === "number") {
         state.setUiFontSizePx(msg.payload);
       } else if (field === "uiColors") {
-        state.setUiColors(normalizeUiColors(msg.payload));
+        state.setUiColors(msg.payload as UiColors);
       }
     } finally {
       applyingBroadcast = false;

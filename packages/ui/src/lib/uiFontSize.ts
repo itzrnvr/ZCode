@@ -1,4 +1,4 @@
-import { readSafeLocalStorage } from "@/lib/browserEnvironment.js";
+import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
 
 const DEFAULT_UI_FONT_SIZE_PX = 14;
 export const MIN_UI_FONT_SIZE_PX = 12;
@@ -15,6 +15,14 @@ export function loadUiFontSizePx(): number {
   const rawValue = readSafeLocalStorage(UI_FONT_SIZE_STORAGE_KEY);
   const storedValue = rawValue === null ? Number.NaN : Number(rawValue);
   return normalizeUiFontSizePx(Number.isFinite(storedValue) ? storedValue : undefined);
+}
+
+/** 归一化 + 持久化 + 立即应用；返回最终生效的字号。 */
+export function writeUiFontSizePx(next: unknown): number {
+  const normalized = normalizeUiFontSizePx(next);
+  writeSafeLocalStorage(UI_FONT_SIZE_STORAGE_KEY, String(normalized));
+  applyUiFontSizePx(normalized);
+  return normalized;
 }
 
 export function applyUiFontSizePx(fontSizePx: number): void {

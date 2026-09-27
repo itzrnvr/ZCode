@@ -1,4 +1,4 @@
-import { readSafeLocalStorage } from "@/lib/browserEnvironment.js";
+import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
 
 export const UI_COLORS_STORAGE_KEY = "zcode-ui-colors";
 
@@ -61,6 +61,17 @@ export function loadUiColors(): UiColors {
   } catch {
     return {};
   }
+}
+
+/**
+ * 归一化 + 持久化 + 立即应用到根节点；整体替换而非合并，
+ * 这样清空（重置）字段也能写入存储并广播出去。
+ */
+export function writeUiColors(next: unknown): UiColors {
+  const normalized = normalizeUiColors(next);
+  writeSafeLocalStorage(UI_COLORS_STORAGE_KEY, JSON.stringify(normalized));
+  applyUiColors(normalized);
+  return normalized;
 }
 
 export function applyUiColors(colors: UiColors): void {
