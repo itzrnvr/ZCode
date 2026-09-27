@@ -4,10 +4,13 @@ import "@zcode/ui/styles.css";
 import {
   ResourceManagerApp,
   ZCodeIntlProvider,
+  applyPointerCursors,
   applyUiColors,
   applyUiFontSizePx,
+  loadPointerCursors,
   loadUiColors,
   loadUiFontSizePx,
+  subscribeToPointerCursorsStorageChanges,
   subscribeToUiColorsStorageChanges,
   subscribeToUiFontSizeStorageChanges,
 } from "@zcode/ui";
@@ -49,13 +52,12 @@ function applyResourceManagerTheme(): void {
   document.documentElement.classList.toggle("theme-zai-dark", appliedTheme === "zai-dark");
 }
 
-applyResourceManagerTheme();
-// 资源管理器不创建主窗口的 Zustand store，text-ui-* 与自定义配色无法自动获得持久化基准。
-// 首屏前显式应用，运行中再由 storage 事件同步，且不改变 html font-size 或接入业务 Host。
 applyUiFontSizePx(loadUiFontSizePx());
 applyUiColors(loadUiColors());
+applyPointerCursors(loadPointerCursors());
 subscribeToUiFontSizeStorageChanges();
 subscribeToUiColorsStorageChanges();
+subscribeToPointerCursorsStorageChanges();
 
 const root = document.getElementById("root");
 if (root) {

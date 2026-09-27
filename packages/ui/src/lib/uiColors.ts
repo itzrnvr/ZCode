@@ -121,15 +121,17 @@ export function subscribeToUiColorsStorageChanges(): () => void {
  * 再按绘制结果归一化，任何色彩空间都能落到 #rrggbb。
  */
 export function readUiColorToken(field: UiColorField, fallback = "#000000"): string {
-  if (typeof document === "undefined") {
+  if (typeof document === "undefined" || !document.body) {
     return fallback;
   }
 
   const probe = document.createElement("div");
   probe.style.cssText = `position:fixed;left:-9999px;top:0;width:1px;height:1px;background-color:var(${UI_COLOR_TOKENS[field]})`;
-  document.body.append(probe);
-  const painted = getComputedStyle(probe).backgroundColor;
-  probe.remove();
-
-  return normalizeUiColor(painted) ?? cssColorToHex(painted) ?? fallback;
+  try {
+    document.body.append(probe);
+    const painted = getComputedStyle(probe).backgroundColor;
+    return normalizeUiColor(painted) ?? cssColorToHex(painted) ?? fallback;
+  } finally {
+    probe.remove();
+  }
 }
