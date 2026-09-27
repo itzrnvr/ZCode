@@ -15,6 +15,7 @@ import { SessionEventType, type SessionEvent } from "@zcode/contracts";
 import type {
   CommandEnvelope,
   ConversationDelta,
+  ConversationRow,
   ConversationRowTarget,
   ConversationSnapshot,
   ConversationTopicFrame,
@@ -87,6 +88,23 @@ function hasPlanMarkdown(row: ToolCallRow): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * rowId 升序行索引中「rowId < 目标」的行数 = 首个 rowId >= 目标 的下标。
+ * rows/range 的游标语义就建立在该升序序上：apply.ts 的不可变/原地两条 delta 路径
+ * 只做尾部 append、前缀裁剪与原位替换，从不插入更小的 rowId。
+ */
+function countRowsBefore(rows: readonly ConversationRow[], rowId: number): number {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    const candidate = rows[mid];
+    if (candidate !== undefined && candidate.rowId < rowId) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 interface Subscription {
@@ -239,6 +257,19 @@ export class ConversationTopicPublisher {
   private nextLogicalFrameSerial = 1;
   /** 当前 snapshot logical frame 的保守上界；流式追加只累计增量，逼近上限才精确序列化。 */
   private wireSnapshotBytesUpperBound: number;
+  /**
+   * profile → 有序可见行索引（rowId 升序）。rows/range 分页、wire snapshot 与 plans 目录
+   * 共用同一份：filterConversationRowsForProfile 当前恒返回 [...rows]，旧实现于是每次
+   * 调用都整表复制 rows.window——一次会话切换 = 1 个快照帧 + N 页分页就要付 N+1 次
+   * O(rows) 复制。投影每次写入都会作废它（ingest / hydration replay / rehydrate）；
+   * 快照对象身份兜底覆盖 seed 与原子候选快照这类整体替换。
+   */
+  private rowsIndex: {
+    snapshot: ConversationSnapshot;
+    byProfile: Map<DeliveryProfile, ConversationRow[]>;
+  } | null = null;
+  /** PERF 观测：行索引重建日志的节流水位，避免每事件刷屏。 */
+  private rowsIndexLoggedAt = 0;
 
   constructor(
     private readonly sessionId: string,
@@ -311,11 +342,46 @@ export class ConversationTopicPublisher {
     return this.getWireSnapshotForProfile(DELIVERY_PROFILES.continuous, snapshot);
   }
 
+  /** 投影写入后作废行索引；下一次读取按需重建（同一写入代际最多重建一次）。 */
+  private invalidateRowsIndex(): void {
+    this.rowsIndex = null;
+  }
+
+  /**
+   * profile 视角的有序可见行（rowId 升序）。按「快照对象 + profile」缓存：同一份快照上的
+   * 快照帧、rows/range 分页与 plans 目录共享一次 O(rows) 构建；快照对象身份兜底覆盖
+   * seed、原子候选快照与 rehydrate 这类整体替换。返回的是共享缓存数组——调用方只读
+   * （切片/过滤本身都会产生新数组），不要原地修改。
+   */
+  private visibleRowsForProfile(
+    profile: DeliveryProfile,
+    snapshot: ConversationSnapshot,
+  ): ConversationRow[] {
+    if (this.rowsIndex?.snapshot !== snapshot) {
+      this.rowsIndex = { snapshot, byProfile: new Map<DeliveryProfile, ConversationRow[]>() };
+    }
+    const cached = this.rowsIndex.byProfile.get(profile);
+    if (cached) return cached;
+    const startedAt = Date.now();
+    const rows = filterConversationRowsForProfile(snapshot.rows.window, profile);
+    // PERF：重建只应发生在投影写入之后。节流到每秒一条，但慢重建始终记录——重建频率
+    // 或耗时与读调用次数同阶时，说明某条读路径没有复用这份索引。
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs >= 4 || Date.now() - this.rowsIndexLoggedAt >= 1000) {
+      this.rowsIndexLoggedAt = Date.now();
+      console.log(
+        `[PERF] conversation-publisher: rows index rebuild rows=${rows.length} in ${elapsedMs}ms`,
+      );
+    }
+    this.rowsIndex.byProfile.set(profile, rows);
+    return rows;
+  }
+
   private getWireSnapshotForProfile(
     profile: DeliveryProfile,
     snapshot = this.projection.getSnapshot(),
   ): ConversationSnapshot {
-    const visibleRows = filterConversationRowsForProfile(snapshot.rows.window, profile);
+    const visibleRows = this.visibleRowsForProfile(profile, snapshot);
     const visibleSnapshot: ConversationSnapshot = {
       ...snapshot,
       rows: {
@@ -445,21 +511,21 @@ export class ConversationTopicPublisher {
   ): V4ConversationRowsRangeResult {
     const snapshot = this.projection.getSnapshot();
     const limit = Math.max(1, Math.min(params.limit, PROTOCOL_V4_LIMITS.rowsRangeMaxLimit));
-    const visibleRows = filterConversationRowsForProfile(
-      snapshot.rows.window,
-      DELIVERY_PROFILES[deliveryProfile],
-    );
-    const eligible =
+    const visibleRows = this.visibleRowsForProfile(DELIVERY_PROFILES[deliveryProfile], snapshot);
+    // 行索引按 rowId 升序（apply.ts 两条 delta 路径只做尾部 append、前缀裁剪与原位替换），
+    // 因此「rowId < beforeRowId 的末 limit 行」= 二分出前缀长度后直接切片，不再每页过滤整窗。
+    const eligibleCount =
       params.beforeRowId === undefined
-        ? visibleRows
-        : visibleRows.filter((row) => row.rowId < (params.beforeRowId as number));
-    const rows = eligible.slice(-limit);
+        ? visibleRows.length
+        : countRowsBefore(visibleRows, params.beforeRowId);
+    const start = Math.max(0, eligibleCount - limit);
+    const rows = visibleRows.slice(start, eligibleCount);
     return {
       rows,
       atSeq: snapshot.seq,
       atRevision: snapshot.revision,
       atLogEpoch: this.logEpoch,
-      hasMore: eligible.length > rows.length,
+      hasMore: eligibleCount > rows.length,
     };
   }
 
@@ -470,7 +536,9 @@ export class ConversationTopicPublisher {
    */
   getPlans(): V4ConversationPlansResult {
     const snapshot = this.projection.getSnapshot();
-    const plans = snapshot.rows.window
+    // 与 wire snapshot 共用同一份行剪辑（plans 是全窗口目录，不能只看 wire tail 的 60 行）；
+    // 行过滤当前是恒等变换，continuous 与 replayable 的完整行集合一致。
+    const plans = this.visibleRowsForProfile(DELIVERY_PROFILES.continuous, snapshot)
       .filter(
         (row): row is ToolCallRow =>
           row.kind === "toolCall" &&
@@ -573,6 +641,8 @@ export class ConversationTopicPublisher {
       if (deltas === null) throw new ProjectionPayloadTooLargeError(candidateBytes);
       this.wireSnapshotBytesUpperBound = nextUpperBound;
     }
+    // 投影已写入（快路径原地替换 / 原子候选 adopt）：行索引作废，下一次读取重建。
+    this.invalidateRowsIndex();
     this.log.push({ seq: event.sequenceNumber, deltas });
     while (this.log.length > this.retention) {
       const evicted = this.log.shift();
@@ -639,6 +709,8 @@ export class ConversationTopicPublisher {
     }
 
     this.projection = candidate.projection;
+    // 整体替换投影：旧索引对应的是上一个投影的行窗口。
+    this.invalidateRowsIndex();
     if (usedBatchHydration) {
       // 批量重放会把派生 actions 延迟到最终 materialization；若允许客户端
       // 用逐事件旧快照的中间 base 续这份日志，batch 从未持有的旧 canEdit/canRetry 无法被
@@ -670,6 +742,7 @@ export class ConversationTopicPublisher {
    */
   private tryBatchHydration(events: readonly SessionEvent[]): boolean {
     this.projection.beginHydrationReplay();
+    this.invalidateRowsIndex();
     let measuredBytes = this.wireSnapshotBytesUpperBound;
     let measuredSequenceNumberBytes = hydrationSequenceNumberBytes(
       this.projection.getSnapshot().seq,
@@ -679,11 +752,18 @@ export class ConversationTopicPublisher {
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index]!;
       const deltas = this.projection.applyHydrationEvent(event);
+      // batch hydration 期间 rows.window 原地推进：每条事件后都必须作废索引，否则随后的
+      // 精确测量会按上一状态的行窗口计算，放宽 16MiB 闸门。
+      this.invalidateRowsIndex();
       const finalEvent = index === events.length - 1;
       const projectionLimit = this.projectionLimitForEvent(event);
       const mustMeasureSnapshot = finalEvent || deltas.some((delta) => delta.op === "row.removed");
 
-      if (finalEvent) this.projection.completeHydrationReplay();
+      if (finalEvent) {
+        this.projection.completeHydrationReplay();
+        // 收敛延迟 materialize 的 actions 会替换行对象：索引必须跟着作废。
+        this.invalidateRowsIndex();
+      }
       const snapshot = this.projection.getSnapshot();
       if (!mustMeasureSnapshot && deltas.length > 0) {
         let wireRowIds: Set<number> | undefined;
@@ -735,6 +815,7 @@ export class ConversationTopicPublisher {
 
     if (events.length === 0) {
       this.projection.completeHydrationReplay();
+      this.invalidateRowsIndex();
       measuredBytes = this.measureWireSnapshotBytes(this.getWireSnapshot());
     }
     this.wireSnapshotBytesUpperBound = measuredBytes;
