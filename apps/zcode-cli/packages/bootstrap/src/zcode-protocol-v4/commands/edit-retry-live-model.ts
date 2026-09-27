@@ -9,8 +9,12 @@ import type { V4SessionRecordView } from "./types.js";
 /**
  * Prefer the live session selection for edit/retry reruns.
  *
- * Data flow:
- * - UI dispatches editUserQuery/retryTurn with target+text only (no model pin).
+ * LEGACY FALLBACK: a renderer that froze the Composer selection now sends it in
+ * the editUserQuery/retryTurn payload, and the command handler consumes that
+ * first (`payload.modelSelection ?? resolveEditRetryModelSelection(...)`).
+ * This helper still covers older clients that dispatch target+text only.
+ *
+ * Data flow when the payload is absent:
  * - Handler resolves the canonical editTarget, whose intent.modelSelection is
  *   the session model captured at the original TurnStarted moment.
  * - Core freezes admittedModelSelection = intent ?? live, so the stale pin wins.
