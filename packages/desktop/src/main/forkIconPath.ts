@@ -1,6 +1,9 @@
 import { app } from "electron";
 import { join } from "node:path";
 
+// Fork: 构建期 define 注入的产品身份（tsup/vite）；未定义时按上游 ZCode 处理。
+declare const __ZCODE_PRODUCT_FLAVOR__: string | undefined;
+
 /**
  * Fork: Blackbird 在仓库里有一整套自己的图标（packages/desktop/build/blackbird）。
  * 打包产物由 packaging 配置直接取用这套图标，但**未打包**运行时（源码调试、本地启动）

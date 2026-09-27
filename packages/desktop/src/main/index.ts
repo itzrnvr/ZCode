@@ -282,10 +282,7 @@ process.on("unhandledRejection", (reason) => {
 const iconPath = resolveIconPath(process.platform === "win32" ? "icon_windows.png" : "icon.png");
 const linuxDesktopIntegrationIconPath =
   process.platform === "linux"
-    ? resolveIconPath(
-        "icon" + "512x512.png",
-        "icons/512x512.png",
-      )
+    ? resolveIconPath("icon_512x512.png", "icons/512x512.png")
     : iconPath;
 let currentApplicationLocale: Locale = DEFAULT_LOCALE;
 let closeToTrayOnWindows = true;

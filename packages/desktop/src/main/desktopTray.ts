@@ -1,6 +1,5 @@
-import { app, Menu, Tray } from "electron";
+import { Menu, Tray } from "electron";
 import { resolveIconPath } from "./forkIconPath.js";
-import { join } from "node:path";
 import {
   DesktopCommandIds,
   desktopMenuMessageIds,
