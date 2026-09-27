@@ -1722,9 +1722,10 @@ export async function listSessionSubagents(
     childSessionIds.map(async (childSessionId) => {
       const childSession = await store.getSession(childSessionId as SessionId);
       if (!childSession || childSession.taskType !== "subagent_child") return null;
-      const childMessages = await store.messages({
-        sessionID: childSession.id,
-      });
+      // perf: manifest 只消费 child 最后一条 assistant message（subagent-session-query 的
+      // lastChildOutcome）；全量 store.messages() 会扫完整个 part 窗口。改用与 resume
+      // 同一条 500 行尾读：尾窗覆盖该行，且与既有尾读路径共用同一语义与顺序。
+      const childMessages = await readPersistedSessionMessages(context, childSession.id);
       const liveChild = context.sessions.get(childSessionId);
       const childProjection = liveChild
         ? await liveChild.app.runtime.getProjection().catch(() => undefined)
@@ -3465,11 +3466,11 @@ async function createRecord(
 
 // perf: optional tail-limited reader — present on SqliteSessionStore (our fork),
 // absent on other implementations. Narrowed once via a named boundary type.
-interface SessionStoreWithTail {
+export interface SessionStoreWithTail {
   messagesTail(input: { sessionID: SessionId; limit: number }): Promise<MessageWithParts[]>;
 }
 
-function hasMessagesTail(
+export function hasMessagesTail(
   store: object,
 ): store is SessionStoreWithTail {
   return "messagesTail" in store && typeof store.messagesTail === "function";
