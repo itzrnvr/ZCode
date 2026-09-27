@@ -216,6 +216,7 @@ export type {
   McpConnectionSnapshot,
   McpPort,
   McpServerConfig,
+  McpToolDescriptor,
   SubagentPort,
   SubagentTaskSnapshot,
   ToolArtifactStorePort,

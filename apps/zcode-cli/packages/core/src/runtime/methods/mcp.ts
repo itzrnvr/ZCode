@@ -5,10 +5,23 @@ import {
   ZCODE_PLUGIN_ID_ENV_KEY,
 } from "@zcode/shared";
 import { registerMcpTools, traceContextToLogContext } from "../deps.js";
-import type { McpConnectionSnapshot, McpServerConfig, TraceContext } from "../deps.js";
+import type {
+  McpConnectionSnapshot,
+  McpServerConfig,
+  McpToolDescriptor,
+  TraceContext,
+} from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
 const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
+
+/**
+ * 首个 turn 等待 MCP 工具注册的上限。健康 server 通常 1s 内连上；死端点或卡住的
+ * OAuth 不该把 provider 请求拖到 session 级的 15s 预算。超时后按当前已连接的部分
+ * 先注册，其余 server settle 后再补注册；工具真正被调用时连接仍未就绪会由
+ * callTool 在调用点报错，而不是阻塞会话/轮次。
+ */
+const MCP_TOOL_REGISTRATION_WAIT_MS = 1_500;
 
 /**
  * 只有同时携带 resolver 注入的官方 plugin id 和本进程私有 authority 的 server 才能共享
@@ -124,45 +137,99 @@ export async function initializeMcp(
   traceContext: TraceContext,
 ): Promise<void> {
   if (this.mcpToolsRegistered) return;
+  // 先置位：等待只发生一次。未就绪的 server 在本函数返回后由其 settle 补注册，
+  // 后续 turn 不会再次进入这里等连接。
+  this.mcpToolsRegistered = true;
 
   const startup = this.startMcpStartup(traceContext);
   const mcpPort = this.mcpPort;
   if (!startup || !mcpPort) {
-    this.mcpToolsRegistered = true;
     return;
   }
   const serverCount = Object.keys(this.config.mcp?.servers ?? {}).length;
-
-  try {
-    const snapshot = await startup;
-    const registered = registerMcpTools(this.registry, mcpPort, snapshot.tools, {
-      allowedTools: this.config.toolAllowlist,
-      disallowedTools: this.config.toolDisallowlist,
-      officialCuaServerNames: computeOfficialCuaServerNames(
-        this.config.mcp?.servers ?? {},
-        new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
-      ),
-    });
-    if (registered.length > 0) {
-      this.invalidateToolCache();
+  const registerFromTools = (
+    tools: readonly McpToolDescriptor[],
+    source: "connected" | "deadline",
+  ): void => {
+    try {
+      const registered = registerMcpTools(this.registry, mcpPort, tools, {
+        allowedTools: this.config.toolAllowlist,
+        disallowedTools: this.config.toolDisallowlist,
+        officialCuaServerNames: computeOfficialCuaServerNames(
+          this.config.mcp?.servers ?? {},
+          new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
+        ),
+      });
+      if (registered.length > 0) {
+        this.invalidateToolCache();
+      }
+      this.logger?.info("MCP tools registered", {
+        ...traceContextToLogContext(traceContext),
+        event: "mcp.tools.registered",
+        module: "core.runtime",
+        registeredToolCount: registered.length,
+        serverCount,
+        source,
+        status: "completed",
+      });
+    } catch (error) {
+      this.logger?.warn("MCP tool registration failed", {
+        ...traceContextToLogContext(traceContext),
+        error: error instanceof Error ? error.message : String(error),
+        event: "mcp.tool_registration.failed",
+        module: "core.runtime",
+        source,
+        status: "failed",
+      });
     }
-    this.logger?.info("MCP tools registered", {
-      ...traceContextToLogContext(traceContext),
-      event: "mcp.tools.registered",
-      module: "core.runtime",
-      registeredToolCount: registered.length,
-      serverCount,
-      status: "completed",
-    });
-  } catch (error) {
-    this.mcpToolsRegistered = true;
-    this.logger?.warn("MCP initialization failed", {
-      ...traceContextToLogContext(traceContext),
-      error: error instanceof Error ? error.message : String(error),
-      event: "mcp.initialization.failed",
-      module: "core.runtime",
-      status: "failed",
-    });
+  };
+
+  let timedOut = false;
+  const settled = await Promise.race([
+    startup.then(
+      (snapshot) => snapshot,
+      (error: unknown) => {
+        this.logger?.warn("MCP initialization failed", {
+          ...traceContextToLogContext(traceContext),
+          error: error instanceof Error ? error.message : String(error),
+          event: "mcp.initialization.failed",
+          module: "core.runtime",
+          status: "failed",
+        });
+        return undefined;
+      },
+    ),
+    new Promise<undefined>((resolve) => {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        resolve(undefined);
+      }, MCP_TOOL_REGISTRATION_WAIT_MS);
+      // 等待期间不阻止进程退出：连接快时不产生额外延迟。
+      timer.unref?.();
+    }),
+  ]);
+
+  if (!timedOut && settled) {
+    registerFromTools(settled.tools, "connected");
+    return;
   }
-  this.mcpToolsRegistered = true;
+  if (timedOut) {
+    // 部分注册：当前已连上的 server 的工具先进入工具表，其余等 startup settle 后补。
+    try {
+      const [, tools] = await Promise.all([mcpPort.status(), mcpPort.listTools()]);
+      registerFromTools(tools, "deadline");
+    } catch (error) {
+      this.logger?.warn("MCP partial tool registration failed", {
+        ...traceContextToLogContext(traceContext),
+        error: error instanceof Error ? error.message : String(error),
+        event: "mcp.tool_registration.partial_failed",
+        module: "core.runtime",
+        status: "failed",
+      });
+    }
+    void startup.then(
+      (snapshot) => registerFromTools(snapshot.tools, "connected"),
+      () => undefined,
+    );
+  }
 }
