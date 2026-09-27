@@ -52,6 +52,10 @@ export function applyPointerCursors(enabled: boolean): void {
   root.setAttribute(POINTER_CURSORS_ATTRIBUTE, POINTER_CURSORS_DISABLED_VALUE);
 }
 
+/**
+ * 供不持有主窗口 store 的入口（如资源管理器窗口）跟随其他窗口写入的光标开关；
+ * 持有 store 的入口必须经 setter 更新，确保 store 状态与 DOM 收敛到同一值。
+ */
 export function subscribeToPointerCursorsStorageChanges(): () => void {
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== POINTER_CURSORS_STORAGE_KEY) {

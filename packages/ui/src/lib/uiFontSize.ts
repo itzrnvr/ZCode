@@ -34,6 +34,10 @@ export function applyUiFontSizePx(fontSizePx: number): void {
   rootStyle.setProperty("--ui-font-size", `${normalizeUiFontSizePx(fontSizePx)}px`);
 }
 
+/**
+ * 供不持有主窗口 store 的入口（如资源管理器窗口）跟随其他窗口写入的字号；
+ * 持有 store 的入口必须经 setter 更新，确保 store 状态与 DOM 收敛到同一值。
+ */
 export function subscribeToUiFontSizeStorageChanges(): () => void {
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== UI_FONT_SIZE_STORAGE_KEY) {

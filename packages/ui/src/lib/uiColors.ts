@@ -96,6 +96,10 @@ export function applyUiColors(colors: UiColors): void {
   }
 }
 
+/**
+ * 供不持有主窗口 store 的入口（如资源管理器窗口）跟随其他窗口写入的颜色覆盖；
+ * 持有 store 的入口必须经 setter 更新，确保 store 状态与 DOM 收敛到同一值。
+ */
 export function subscribeToUiColorsStorageChanges(): () => void {
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== UI_COLORS_STORAGE_KEY) {
