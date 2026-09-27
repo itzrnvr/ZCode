@@ -280,10 +280,10 @@ export function createRemoteWorkspaceServiceCollection(params: {
               ...(settings.systemPromptCustomText?.trim()
                 ? { systemPromptCustomText: settings.systemPromptCustomText }
                 : {}),
-              ...(settings.systemPromptSectionTexts &&
-              Object.values(settings.systemPromptSectionTexts).some(
-                (v): v is string => typeof v === "string" && v.trim().length > 0,
-              )
+              // Fork: per-section overrides. A defined map is authoritative and complete:
+              // non-empty entries replace the applied overrides, an empty map clears them.
+              // Omitted only for legacy settings without the field (keep current).
+              ...(settings.systemPromptSectionTexts !== undefined
                 ? {
                     systemPromptSectionTexts: Object.fromEntries(
                       Object.entries(settings.systemPromptSectionTexts).filter(
