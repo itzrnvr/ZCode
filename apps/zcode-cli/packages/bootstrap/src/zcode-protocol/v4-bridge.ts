@@ -93,7 +93,6 @@ import {
   activateSessionForResume,
   createSessionRecordForV4,
   ensureSessionModelAvailableForNextTurn,
-  hasMessagesTail,
   listSessionSubagents,
   registerForkedSession,
   readSessionContextUsage,
@@ -1806,15 +1805,10 @@ export function createConversationV4Gateway(
               store: {
                 getSession: (id) => store.getSession(id),
                 messages: (input) => store.messages(input),
-                // perf: 适配器是手工收窄的，尾读能力必须显式转发；不转发时
-                // cold-event-merge 的 messagesTail 分支永远命中不了实现，
-                // live-but-unhydrated 会话只能退回全量 messages()。
-                ...(hasMessagesTail(store)
-                  ? {
-                      messagesTail: (input: { sessionID: SessionId; limit: number }) =>
-                        store.messagesTail(input),
-                    }
-                  : {}),
+                // perf: hydrate 路径不能走 messagesTail —— 裸尾部读（按 part 截断）
+                // 对 revert/fork 会话选择不出版本正确的活跃分支（实测 2703-part 会话
+                // 被截成 6 条消息 → 空会话）。resume 路径已提供等价且分支正确的
+                // persistedMessages；只有它缺席时才回落全量读取，行为与修复前一致。
                 readTarget: (input) => store.readTarget(input),
                 ...(store.sessionEntries
                   ? {
