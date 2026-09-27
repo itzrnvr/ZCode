@@ -11,7 +11,8 @@ import {
   type LivePluginSubagent,
 } from "../../plugin-reference/index.js";
 import { createMessageId, traceContextToLogContext } from "../deps.js";
-import type { TraceContext } from "../deps.js";
+import type { McpConnectionSnapshot, TraceContext } from "../deps.js";
+import { settleWithin } from "./mcp.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
 async function collectLiveMcpServers(
@@ -24,7 +25,14 @@ async function collectLiveMcpServers(
   // 这里提前 await 不增加额外等待。引用绝不触发 connect/reconnect/OAuth——只读取现状。
   await runtime.initializeMcp(traceContext);
   const statuses = await runtime.mcpPort.status();
-  const snapshot = runtime.mcpStartupPromise ? await runtime.mcpStartupPromise : undefined;
+  // 提醒只是注入信息，绝不为了等 MCP settle 拖住轮次：与注册路径共用同一截止时间，
+  // 超时按“快照未知”处理（provider 可见数记 0，宁可少报也不虚报能力）。
+  const snapshot = runtime.mcpStartupPromise
+    ? await settleWithin<McpConnectionSnapshot | undefined>(
+        runtime.mcpStartupPromise.catch(() => undefined),
+        undefined,
+      )
+    : undefined;
   const registeredToolNames = new Set(runtime.getTools().map((tool) => tool.name));
   // 与 turn-loop 的 provider 工具过滤保持完全相同的“完整工具名”语义；
   // 带参数的执行规则不会把整个工具从 provider 工具表移除，不能在 reminder 侧扩大解释。

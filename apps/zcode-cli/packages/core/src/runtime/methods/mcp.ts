@@ -132,6 +132,38 @@ export function startMcpStartup(
   return this.mcpStartupPromise;
 }
 
+/**
+ * 等到 promise settle，超时则回退到 fallback。
+ * 补充注册与提醒注入都走这条路径：这些信息是“锦上添花”，
+ * 任何上游卡住都不允许再把首个 provider 请求拖住。
+ */
+export function settleWithin<T>(
+  promise: Promise<T>,
+  fallback: T,
+  timeoutMs: number = MCP_TOOL_REGISTRATION_WAIT_MS,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    // 计时器必须保持 ref（默认状态）：unref 的计时器在事件循环空闲时不会触发，
+    // 单发 CLI 场景下这个“截止时间”会静默失效，首个轮次又会被上游拖住。
+    // 提前 settle 时清掉它，避免多留一个待触发的计时器。
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      resolve(fallback);
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function initializeMcp(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
@@ -185,7 +217,7 @@ export async function initializeMcp(
   };
 
   let timedOut = false;
-  const settled = await Promise.race([
+  const settled = await settleWithin(
     startup.then(
       (snapshot) => snapshot,
       (error: unknown) => {
@@ -199,15 +231,12 @@ export async function initializeMcp(
         return undefined;
       },
     ),
-    new Promise<undefined>((resolve) => {
-      const timer = setTimeout(() => {
-        timedOut = true;
-        resolve(undefined);
-      }, MCP_TOOL_REGISTRATION_WAIT_MS);
-      // 等待期间不阻止进程退出：连接快时不产生额外延迟。
-      timer.unref?.();
-    }),
-  ]);
+    undefined,
+    MCP_TOOL_REGISTRATION_WAIT_MS,
+    () => {
+      timedOut = true;
+    },
+  );
 
   if (!timedOut && settled) {
     registerFromTools(settled.tools, "connected");
@@ -216,7 +245,16 @@ export async function initializeMcp(
   if (timedOut) {
     // 部分注册：当前已连上的 server 的工具先进入工具表，其余等 startup settle 后补。
     try {
-      const [, tools] = await Promise.all([mcpPort.status(), mcpPort.listTools()]);
+      // status()/listTools() 也是 RPC：上游卡住时它们同样会挂住，
+      // 因此这里给部分注册一个短上限，拿不到就当没有可用工具。
+      const tools = await settleWithin(
+        mcpPort
+          .listTools()
+          .then((result) => result ?? ([] as readonly McpToolDescriptor[]))
+          .catch(() => [] as readonly McpToolDescriptor[]),
+        [] as readonly McpToolDescriptor[],
+        MCP_TOOL_REGISTRATION_WAIT_MS,
+      );
       registerFromTools(tools, "deadline");
     } catch (error) {
       this.logger?.warn("MCP partial tool registration failed", {
