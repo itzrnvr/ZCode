@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { migrateUserSubagentMarkdown, migrateSubagentStateFile } from "@zcode/shared/node";
-import { shouldWalkSkillDirectoryEntry } from "@zcode/shared";
+import { SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES } from "@zcode/shared";
 import {
   parseAgentProfileFromMarkdown,
   type AgentProfile,
@@ -322,8 +322,9 @@ function isDisabledUserProfile(
  * 依赖目录与构建产物里不会有 agent profile 的 Markdown；用户 agent 根下经常
  * 带着 node_modules（实测 ~/.zcode/agents/claude-code/node_modules 里 160+ 个
  * README/LICENSE.md），逐个当 profile 解析既拖慢每次冷启动，又刷出大量
- * missing_frontmatter 诊断。递归规则复用技能扫描的共享策略
- * （node_modules/dist/build… 与点目录统一排除），两端不再各持一份名单。
+ * missing_frontmatter 诊断。排除名单复用技能扫描的共享常量，与迁移扫描
+ * （subagentMarkdownMigration）保持同一份内容目录口径；**点目录照旧遍历**——
+ * 修复前就会读取那里的 profile，收窄行为只限内容目录。
  * 符号链接目录本就不在 withFileTypes 的 isDirectory() 命中范围内。
  */
 function listMarkdownFiles(root: string): string[] {
@@ -334,7 +335,7 @@ function listMarkdownFiles(root: string): string[] {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
-      if (!shouldWalkSkillDirectoryEntry(entry.name)) continue;
+      if (SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES.has(entry.name)) continue;
       result.push(...listMarkdownFiles(path));
       continue;
     }
