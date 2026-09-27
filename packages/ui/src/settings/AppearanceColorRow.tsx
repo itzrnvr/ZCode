@@ -1,12 +1,10 @@
-import { useState } from "react";
-import { RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button.js";
-import { Input } from "@/components/ui/input.js";
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover.js";
+import { useEffect, useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { cn } from "@/components/lib/utils.js";
+import { ColorPicker } from "@/settings/ColorPicker.js";
 import {
   normalizeUiColor,
+  readUiColorToken,
   UI_COLOR_TOKENS,
   type UiColorField,
 } from "@/lib/uiColors.js";
@@ -19,7 +17,7 @@ export const UI_COLOR_LABEL_IDS: Record<UiColorField, string> = {
   card: "settings.appearance.colors.card",
 };
 
-/** 每个 Token 只给常用色板，避免设置页变成全功能取色器。 */
+/** 每个 Token 的常用色板；取色器负责其余任意色。 */
 export const UI_COLOR_PRESETS: Record<UiColorField, readonly string[]> = {
   accent: [
     "#3b82f6",
@@ -39,7 +37,7 @@ export const UI_COLOR_PRESETS: Record<UiColorField, readonly string[]> = {
 
 /**
  * 单行颜色控制：色块即当前生效色（直接读 Token 变量，含主题默认值），
- * 点击展开色板 + 十六进制输入 + 重置，控制列保持一行宽。
+ * 点击展开取色器（SV 面板 + 色相 + 十六进制 + 吸管 + 预设 + 重置）。
  */
 export function AppearanceColorRow({
   field,
@@ -51,38 +49,25 @@ export function AppearanceColorRow({
   onChange: (color: string | undefined) => void;
 }) {
   const { intl } = useZCodeIntl();
-  const [draft, setDraft] = useState(value ?? "");
-  const [presetOpen, setPresetOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [effective, setEffective] = useState(() => value ?? "");
   const label = intl.formatMessage({ id: UI_COLOR_LABEL_IDS[field] });
-  const presets = UI_COLOR_PRESETS[field];
-  const draftInvalid = draft.trim() !== "" && !normalizeUiColor(draft);
 
-  const clear = () => {
-    setDraft("");
-    onChange(undefined);
-  };
-
-  const commit = () => {
-    if (draft.trim() === "") {
-      clear();
+  // 没有覆盖值时取色器以主题解析色为起点：打开时读一次 Token 计算值。
+  useEffect(() => {
+    if (!open) {
       return;
     }
+    setEffective(value ?? readUiColorToken(field));
+  }, [field, open, value]);
 
-    const color = normalizeUiColor(draft);
-    if (!color) {
-      // 非法输入直接丢弃，回退到当前生效值。
-      setDraft(value ?? "");
-      return;
-    }
-
-    setDraft(color);
-    if (color !== value) {
-      onChange(color);
-    }
+  const pick = (color: string) => {
+    setEffective(normalizeUiColor(color) ?? color);
+    onChange(color);
   };
 
   return (
-    <Popover open={presetOpen} onOpenChange={setPresetOpen}>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -102,69 +87,17 @@ export function AppearanceColorRow({
           </span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-auto gap-2.5 p-2.5">
-        <PopoverTitle>
-          {intl.formatMessage({ id: "settings.appearance.colors.presets" })}
-        </PopoverTitle>
-        <div
-          role="group"
-          aria-label={intl.formatMessage({ id: "settings.appearance.colors.presets" })}
-          className="grid grid-cols-4 gap-1.5"
-        >
-          {presets.map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              aria-label={preset}
-              aria-pressed={value === preset}
-              onClick={() => {
-                setDraft(preset);
-                onChange(preset);
-                setPresetOpen(false);
-              }}
-              className={cn(
-                "size-6 cursor-pointer rounded-full border border-border transition-shadow",
-                value === preset && "ring-2 ring-brand ring-offset-1 ring-offset-panel",
-              )}
-              style={{ backgroundColor: preset }}
-            />
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Input
-            value={draft}
-            size="sm"
-            spellCheck={false}
-            autoComplete="off"
-            placeholder={intl.formatMessage({ id: "settings.appearance.colors.hexPlaceholder" })}
-            aria-label={label}
-            aria-invalid={draftInvalid || undefined}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            onBlur={commit}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.currentTarget.blur();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                setDraft(value ?? "");
-              }
-            }}
-            className="w-28 font-mono"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={!value}
-            aria-label={intl.formatMessage(
-              { id: "settings.appearance.colors.resetField" },
-              { name: label },
-            )}
-            onClick={clear}
-          >
-            <RotateCcw className="size-3.5" aria-hidden="true" />
-          </Button>
-        </div>
+      <PopoverContent align="end" className="w-[252px] gap-2 p-2.5">
+        <ColorPicker
+          label={label}
+          value={effective}
+          presets={UI_COLOR_PRESETS[field]}
+          onChange={pick}
+          onReset={() => {
+            setEffective(readUiColorToken(field));
+            onChange(undefined);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );

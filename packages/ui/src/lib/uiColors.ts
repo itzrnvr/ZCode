@@ -107,3 +107,18 @@ export function subscribeToUiColorsStorageChanges(): () => void {
   window.addEventListener("storage", handleStorage);
   return () => window.removeEventListener("storage", handleStorage);
 }
+
+/**
+ * Token 当前生效色的十六进制值（未覆盖时即主题解析值），供取色器作为起点。
+ * 变量由 styles.css 声明为字面 hex，因此读到的就是编辑器可编辑的形态。
+ */
+export function readUiColorToken(field: UiColorField, fallback = "#000000"): string {
+  if (typeof document === "undefined") {
+    return fallback;
+  }
+
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(UI_COLOR_TOKENS[field])
+    .trim();
+  return normalizeUiColor(raw) ?? fallback;
+}

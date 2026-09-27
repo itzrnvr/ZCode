@@ -2134,6 +2134,9 @@ const enUS: Record<string, string> = {
   "settings.appearance.colors.resetField": "Reset {name}",
   "settings.appearance.colors.resetAll": "Reset all",
   "settings.appearance.colors.hexPlaceholder": "#RRGGBB",
+  "settings.appearance.colors.hue": "Hue of {name}",
+  "settings.appearance.colors.saturation": "Saturation and brightness of {name}",
+  "settings.appearance.colors.pickFromScreen": "Pick {name} from screen",
   "settings.appearance.colors.themeDefault": "Theme default",
   "settings.uiFontSize": "UI font size",
   "settings.uiFontSizeDescription":

@@ -148,9 +148,10 @@ export function AppearanceSectionContent({
           }
         />
         {UI_COLOR_FIELDS.map((field) => (
-          // key 带当前值：外部（广播 / 重置）改动后重建本地草稿，避免残留未提交输入。
+          // 只按字段做 key：草稿由取色器内部的 value 同步处理，
+          // 若把当前色也编进 key，每次取色都会重挂载并关掉弹出的取色器。
           <SettingsRow
-            key={`${field}:${uiColors[field] ?? ""}`}
+            key={field}
             label={intl.formatMessage({ id: UI_COLOR_LABEL_IDS[field] })}
             control={
               <AppearanceColorRow
