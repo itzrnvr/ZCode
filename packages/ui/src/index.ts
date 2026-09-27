@@ -86,6 +86,11 @@ export {
   loadUiFontSizePx,
   subscribeToUiFontSizeStorageChanges,
 } from "./lib/uiFontSize.js";
+export {
+  applyUiColors,
+  loadUiColors,
+  subscribeToUiColorsStorageChanges,
+} from "./lib/uiColors.js";
 export { reportUiLaunchToInput } from "./lib/uiPerfArmsTelemetry.js";
 export {
   RendererUserActionTelemetry,

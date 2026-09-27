@@ -2118,6 +2118,18 @@ const enUS: Record<string, string> = {
   "settings.appearance.codeTitle": "Code settings",
   "settings.appearance.codeDescription":
     "Choose code themes, font size, and display options independently from the interface font size.",
+  "settings.appearance.colors.title": "Colors",
+  "settings.appearance.colors.description":
+    "Recolor the accent and surfaces of the current theme. Colors left unset follow the theme.",
+  "settings.appearance.colors.accent": "Accent",
+  "settings.appearance.colors.background": "Background",
+  "settings.appearance.colors.sidebar": "Sidebar",
+  "settings.appearance.colors.card": "Card",
+  "settings.appearance.colors.presets": "Presets",
+  "settings.appearance.colors.selectPreset": "Choose {name} color",
+  "settings.appearance.colors.resetField": "Reset {name}",
+  "settings.appearance.colors.resetAll": "Reset all",
+  "settings.appearance.colors.hexPlaceholder": "#RRGGBB",
   "settings.uiFontSize": "UI font size",
   "settings.uiFontSizeDescription":
     "Adjust interface text without changing icons or layout dimensions.",
