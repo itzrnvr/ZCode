@@ -1255,7 +1255,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
       className="flex h-full flex-col overflow-hidden"
     >
       <div className="h-12 [app-region:drag]"></div>
-      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden [overflow-x:clip]">
         <div
           className={cn(
             "absolute inset-0 flex min-h-0 flex-col transition-transform duration-200 ease-out",
