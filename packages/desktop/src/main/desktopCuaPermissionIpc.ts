@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { app, BrowserWindow, ipcMain, nativeImage, screen } from "electron";
+import { resolveIconPath } from "./forkIconPath.js";
 import { PlatformChannels, type CuaPermissionKind, type Locale } from "@zcode/shared";
 import {
   cuaHelperBundleFingerprintUnchanged,
@@ -36,9 +37,7 @@ let cachedZCodeIcon: Electron.NativeImage | null = null;
 
 function resolveZCodeIcon(): Electron.NativeImage {
   if (cachedZCodeIcon && !cachedZCodeIcon.isEmpty()) return cachedZCodeIcon;
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, "icon.png")
-    : join(import.meta.dirname, "..", "..", "build", "icon.png");
+  const iconPath = resolveIconPath("icon.png");
   const image = nativeImage.createFromPath(iconPath);
   cachedZCodeIcon = image.isEmpty()
     ? nativeImage.createFromDataURL(CUA_HELPER_DRAG_ICON_DATA_URL)

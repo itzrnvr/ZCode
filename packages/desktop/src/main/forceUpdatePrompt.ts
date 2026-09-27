@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- 强制升级提示窗口包含内联 HTML/CSS 和状态脚本，启动前不能依赖 renderer 包 */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { resolveUnpackagedIconPath } from "./forkIconPath.js";
 import { type Locale } from "@zcode/shared";
 import type { ForceUpdateDialogText, ForceUpdateGuardLogger } from "./forceUpdateGuard.js";
 import type { ForceAutoUpdateState } from "./autoUpdater.js";
@@ -30,7 +31,8 @@ function escapeHtml(value: string): string {
 
 function readForceUpdatePromptIcon(): string | null {
   try {
-    const iconPath = resolve(process.cwd(), "build/icon.png");
+    // Fork: 未打包运行时按 fork 身份取 build/blackbird/icon.png，否则是上游 Z.ai 图标。
+    const iconPath = resolveUnpackagedIconPath("icon.png");
     const icon = readFileSync(iconPath).toString("base64");
     return `data:image/png;base64,${icon}`;
   } catch {

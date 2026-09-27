@@ -2,6 +2,7 @@ import type { BrowserWindow, MessageBoxReturnValue } from "electron";
 import { existsSync, readFileSync } from "node:fs";
 import { arch, hostname, platform, release, type, version as osVersion } from "node:os";
 import { join } from "node:path";
+import { resolveUnpackagedIconPath } from "./forkIconPath.js";
 import {
   DEFAULT_LOCALE,
   type Locale,
@@ -214,9 +215,10 @@ function formatAboutOptimizationLine(
 }
 
 function resolveAboutIconPath(isPackaged: boolean): string {
+  // isPackaged 与 app.isPackaged 同源；fork 身份下未打包路径切到 blackbird 图标。
   return isPackaged
     ? join(process.resourcesPath, "icon.png")
-    : join(import.meta.dirname, "../../build/icon.png");
+    : resolveUnpackagedIconPath("icon.png");
 }
 
 export async function showAboutDialog(
