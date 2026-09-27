@@ -40,6 +40,7 @@ import {
   type SubagentWaitOptions,
   type TraceContext,
 } from "@zcode/contracts";
+import type { ModelSelection } from "@zcode/shared";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -117,9 +118,10 @@ export interface ExploreSubagentPortOptions {
   enqueueParentTaskNotification?: EnqueueParentTaskNotification;
   outputRootDir?: string;
   profiles?: readonly AgentProfile[];
-  builtInModelSelectionOverrides?: Partial<
-    Record<"general-purpose" | "Explore", import("@zcode/shared").ModelSelection>
-  >;
+  builtInModelSelectionOverrides?: Partial<Record<"general-purpose" | "Explore", ModelSelection>>;
+  getBuiltInModelSelectionOverrides?: () =>
+    | Partial<Record<"general-purpose" | "Explore", ModelSelection>>
+    | undefined;
   runtimeTaskRegistry?: RuntimeTaskRegistry;
   createAgentId?: () => string;
   getAllowedTools?: (profile: AgentProfile) => readonly string[];
@@ -128,21 +130,41 @@ export interface ExploreSubagentPortOptions {
   logger?: Logger;
 }
 
-export function createExploreSubagentPort(options: ExploreSubagentPortOptions): SubagentPort {
+export function createExploreSubagentPort(
+  options: ExploreSubagentPortOptions,
+): SubagentPort & {
+  updateBuiltInModelSelectionOverrides: (
+    overrides: Partial<Record<"general-purpose" | "Explore", ModelSelection>> | undefined,
+  ) => void;
+} {
   const registry = options.runtimeTaskRegistry ?? new InMemoryRuntimeTaskRegistry();
   const abortControllers = new Map<string, AbortController>();
   const borrowedForegroundAgentIds = new Set<string>();
-  const profiles = normalizeAgentProfiles(options.profiles ?? [], {
-    builtInModelSelectionOverrides: options.builtInModelSelectionOverrides,
-  });
+  // 覆盖项会被运行时活更新；每次解析都读当前值，避免内置子智能体的模型选择停在端口创建时的快照。
+  let builtInModelSelectionOverrides = options.builtInModelSelectionOverrides;
+  const resolveActiveProfiles = (): AgentProfile[] => {
+    const liveOverrides =
+      options.getBuiltInModelSelectionOverrides?.() ?? builtInModelSelectionOverrides;
+    return normalizeAgentProfiles(options.profiles ?? [], {
+      builtInModelSelectionOverrides: liveOverrides,
+    });
+  };
   const autoBackgroundMs = normalizeAutoBackgroundMs(options.autoBackgroundMs);
 
-  const port: SubagentPort & { start: NonNullable<SubagentPort["start"]> } = {
+  const port: SubagentPort & {
+    start: NonNullable<SubagentPort["start"]>;
+    updateBuiltInModelSelectionOverrides: (
+      overrides: Partial<Record<"general-purpose" | "Explore", ModelSelection>> | undefined,
+    ) => void;
+  } = {
     async launch(
       rawRequest: SubagentLaunchRequest,
       launchOptions?: SubagentLaunchOptions,
     ): Promise<AgentOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(
+        resolveActiveProfiles(),
+        rawRequest,
+      );
       const executionRequest = toSubagentExecutionRequest(request);
       const backgroundRequested =
         rawRequest.runInBackground === true || profile.background === true;
@@ -174,7 +196,10 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
       rawRequest: SubagentRunRequest,
       runOptions?: SubagentRunOptions,
     ): Promise<AgentOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(
+        resolveActiveProfiles(),
+        rawRequest,
+      );
       const lifecycle = createSubagentLifecycle(options, request, profile);
       const startedAt = new Date(lifecycle.startedAt);
 
@@ -440,7 +465,10 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
       rawRequest: SubagentStartRequest,
       startOptions?: SubagentStartOptions,
     ): Promise<AgentBackgroundedOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(
+        resolveActiveProfiles(),
+        rawRequest,
+      );
       const lifecycle = createSubagentLifecycle(options, request, profile);
       const startedAt = new Date(lifecycle.startedAt);
       const output = createAgentBackgroundedOutput(request, lifecycle);
@@ -571,12 +599,19 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
     ): Promise<SubagentSendMessageResult> {
       return sendMessageToLocalAgent(
         options,
-        profiles,
+        resolveActiveProfiles(),
         registry,
         abortControllers,
         request,
         sendOptions,
       );
+    },
+
+    updateBuiltInModelSelectionOverrides(
+      overrides: Partial<Record<"general-purpose" | "Explore", ModelSelection>> | undefined,
+    ): void {
+      // 只做活引用替换：非对象输入归一为 {}；解析时仍按「调用方 profile 覆盖内置」合并。
+      builtInModelSelectionOverrides = isRecord(overrides) ? overrides : {};
     },
   };
 
