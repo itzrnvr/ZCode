@@ -6,7 +6,7 @@ import {
 // --- side-chat persistence integration (single import line) ---
 import { readPersistedSidePaneState, persistSidePaneState } from "./sidePanePersistence.js";
 
-interface TaskSidePaneMemoryState {
+export interface TaskSidePaneMemoryState {
   sidePaneState: WorkspaceSidePaneState | null;
   isSidePaneCollapsed: boolean;
   /** 对话级展开/收起偏好；tabs 本身仍按 workspace 复用。 */
@@ -79,7 +79,7 @@ export function readTaskSidePaneMemoryState(key: string | null): TaskSidePaneMem
   let state = taskSidePaneMemory.get(key);
   if (!state) {
     // side-chat persistence: fallback to localStorage on renderer reload
-    state = readPersistedSidePaneState(key);
+    state = readPersistedSidePaneState(key) ?? undefined;
     if (state) {
       taskSidePaneMemory.set(key, state);
     }
