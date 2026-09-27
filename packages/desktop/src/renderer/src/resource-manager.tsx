@@ -4,8 +4,11 @@ import "@zcode/ui/styles.css";
 import {
   ResourceManagerApp,
   ZCodeIntlProvider,
+  applyUiColors,
   applyUiFontSizePx,
+  loadUiColors,
   loadUiFontSizePx,
+  subscribeToUiColorsStorageChanges,
   subscribeToUiFontSizeStorageChanges,
 } from "@zcode/ui";
 
@@ -47,10 +50,12 @@ function applyResourceManagerTheme(): void {
 }
 
 applyResourceManagerTheme();
-// 资源管理器不创建主窗口的 Zustand store，text-ui-* 无法自动获得持久化基准。
+// 资源管理器不创建主窗口的 Zustand store，text-ui-* 与自定义配色无法自动获得持久化基准。
 // 首屏前显式应用，运行中再由 storage 事件同步，且不改变 html font-size 或接入业务 Host。
 applyUiFontSizePx(loadUiFontSizePx());
+applyUiColors(loadUiColors());
 subscribeToUiFontSizeStorageChanges();
+subscribeToUiColorsStorageChanges();
 
 const root = document.getElementById("root");
 if (root) {

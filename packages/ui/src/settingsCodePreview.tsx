@@ -22,6 +22,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { CodePreviewSettings } from "@/store/index.js";
 import { THEME_MODES } from "@/settings/settingsPageConfig.js";
 import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "@/lib/uiFontSize.js";
+import { AppearanceColorsCard } from "@/settings/AppearanceColorsCard.js";
 
 function FontSizeInput({
   value,
@@ -154,6 +155,18 @@ export function AppearanceSectionContent({
             />
           </CardContent>
         </Card>
+      </div>
+
+      <div className="min-w-0 space-y-3">
+        <div>
+          <h3 className="text-ui-lg font-semibold text-foreground">
+            {intl.formatMessage({ id: "settings.appearance.colors.title" })}
+          </h3>
+          <p className="mt-1 text-ui-base leading-6 text-foreground-subtle">
+            {intl.formatMessage({ id: "settings.appearance.colors.description" })}
+          </p>
+        </div>
+        <AppearanceColorsCard />
       </div>
 
       <div className="space-y-6">

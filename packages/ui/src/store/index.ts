@@ -31,6 +31,13 @@ import {
   UI_FONT_SIZE_STORAGE_KEY,
 } from "@/lib/uiFontSize.js";
 import {
+  applyUiColors,
+  loadUiColors,
+  normalizeUiColors,
+  UI_COLORS_STORAGE_KEY,
+  type UiColors,
+} from "@/lib/uiColors.js";
+import {
   isTaskNotificationEnabled,
   isTaskNotificationSoundPreferenceEnabled,
   persistTaskNotificationEnabled,
@@ -119,6 +126,10 @@ export interface ZCodeState {
   /** UI 根 rem 字号（px） */
   uiFontSizePx: number;
   setUiFontSizePx: (fontSizePx: number) => void;
+
+  /** 用户自定义的 UI 颜色覆盖；缺省字段跟随当前主题 */
+  uiColors: UiColors;
+  setUiColors: (uiColors: UiColors) => void;
 
   /** 是否启用性能模式 */
   performanceMode: boolean;
@@ -211,9 +222,9 @@ export interface ZCodeState {
 // 需要广播的字段 —— 只有这些字段的变更会发送给其他窗口
 // ============================================================================
 
-const BROADCAST_FIELDS = new Set(["theme", "locale", "uiFontSizePx", "interfaceMode"]);
+const BROADCAST_FIELDS = new Set(["theme", "locale", "uiFontSizePx", "uiColors", "interfaceMode"]);
 
-type BroadcastField = "theme" | "locale" | "uiFontSizePx" | "interfaceMode";
+type BroadcastField = "theme" | "locale" | "uiFontSizePx" | "uiColors" | "interfaceMode";
 
 /** 广播频道名前缀 */
 const STATE_CHANNEL_PREFIX = "state:";
@@ -291,6 +302,15 @@ export function createZCodeStore(
       writeSafeLocalStorage(UI_FONT_SIZE_STORAGE_KEY, String(normalizedFontSizePx));
       applyUiFontSizePx(normalizedFontSizePx);
       set({ uiFontSizePx: normalizedFontSizePx });
+    },
+
+    uiColors: loadUiColors(),
+    setUiColors: (uiColors: UiColors) => {
+      // 整体替换而不是合并：重置（清空）字段也要能广播出去，接收窗口不会残留旧覆盖。
+      const normalizedUiColors = normalizeUiColors(uiColors);
+      writeSafeLocalStorage(UI_COLORS_STORAGE_KEY, JSON.stringify(normalizedUiColors));
+      applyUiColors(normalizedUiColors);
+      set({ uiColors: normalizedUiColors });
     },
 
     performanceMode: loadPerformanceMode(),
@@ -482,6 +502,8 @@ export function createZCodeStore(
         state.setInterfaceMode(normalizeInterfaceMode(msg.payload));
       } else if (field === "uiFontSizePx" && typeof msg.payload === "number") {
         state.setUiFontSizePx(msg.payload);
+      } else if (field === "uiColors") {
+        state.setUiColors(normalizeUiColors(msg.payload));
       }
     } finally {
       applyingBroadcast = false;
@@ -491,6 +513,7 @@ export function createZCodeStore(
   syncSystemThemeListener(useStore.getState().theme);
   applyTheme(useStore.getState().theme);
   applyUiFontSizePx(useStore.getState().uiFontSizePx);
+  applyUiColors(useStore.getState().uiColors);
   document.documentElement.classList.toggle(
     "dark",
     resolveTheme(useStore.getState().theme) === "dark",
