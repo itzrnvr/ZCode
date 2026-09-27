@@ -1,17 +1,50 @@
 // System-prompt section catalog: what the model sees, where it lives, what feeds it.
 // New file — no upstream merge conflict risk.
 //
-// Static metadata for the settings inspector. Live content for dynamic sections
-// (env, git, date, skills, AGENTS.md) resolves per-session in the agent process;
-// the UI shows the source path + how each section is fed, plus the static text
-// inline where it is a hardcoded const. Custom-text overrides for the two
-// editable sections live in settings; AGENTS.md stays file-sourced.
+// One row per section the ContextBuilder can emit. Each row declares its capability
+// up front so the settings UI renders exactly one control story per row:
+// - "editable": a text editor backed by the section-text channel below;
+// - "switch": a kill-switch (and, where the text is dynamic, a read-only preview);
+// - "readonly": no control at all — the row shows the reason as a badge instead.
+//
+// defaultText is the effective built-in text, copied verbatim from the owning source
+// file. It is what "Reset to default" restores and what the editor is prefilled with.
+// Rows whose text is assembled at runtime (env, git, date, skills, output style)
+// carry no defaultText and never offer an editor.
+//
+// Neither capability nor defaultText is authored here: they mirror
+// apps/zcode-cli/packages/core/src/context/{builder.ts,dynamic-sections.ts,sections/*}.
+
+export type PromptSectionGroup = "core" | "environment" | "memory" | "tooling";
+
+/** What the row can actually do; the UI renders one story per value. */
+export type PromptSectionCapability = "editable" | "switch" | "readonly";
+
+/** Section-text override keys the core honors (see core/context/system-prompt-switches.ts). */
+export type EditableSectionTextKey =
+  | "cli-prefix"
+  | "harness"
+  | "desktop-context"
+  | "dynamic-behavior"
+  | "context-management";
+
+export type SystemPromptSwitchKey =
+  | "systemPromptSecurityNoticeEnabled"
+  | "systemPromptAutoMemoryEnabled"
+  | "systemPromptAgentsMdEnabled";
+
+/** Where an editable row persists its text. Empty/absent means "use the built-in text". */
+export type PromptSectionEditChannel =
+  | { kind: "section-text"; sectionKey: EditableSectionTextKey }
+  | { kind: "security-notice-text" }
+  | { kind: "custom-prompt-text" };
 
 export interface PromptSectionMeta {
   /** Stable key used by the settings UI. */
   key: string;
   /** Display name shown in the inspector. */
   name: string;
+  group: PromptSectionGroup;
   /** Short description of what the section does. */
   description: string;
   /** Repo-relative source file owning the text. */
@@ -25,45 +58,84 @@ export interface PromptSectionMeta {
     | "config-passthrough";
   /** Injection target in the assembled prompt. */
   injection: "system-stable" | "system-dynamic" | "meta-user";
-  /** Whether the section can be toggled or edited from settings. */
-  control: "kill-switch" | "editor" | "kill-switch+editor" | "none";
-  /**
-   * Built-in default text for inline preview + reset reference. Only for
-   * static-const sections small enough to embed; live sections show a
-   * placeholder describing what resolves per session.
-   */
+  capability: PromptSectionCapability;
+  /** Why there is no editor (readonly) or what the switch removes; rendered as a badge. */
+  controlNote: string;
+  /** Editable rows only: the settings channel that stores the override. */
+  edit?: PromptSectionEditChannel;
+  /** Rows governed by a global kill-switch. Absent = always on. */
+  switchKey?: SystemPromptSwitchKey;
+  /** Effective built-in text; absent for sections assembled per session. */
   defaultText?: string;
+  /** Matching `source` id in the CLI ContextBuilder output, for preview labeling. */
+  liveSourceId?: string;
+  /** Content depends on the live session; a workspace preview cannot show it. */
+  sessionOnly?: boolean;
 }
+
+export const SYSTEM_PROMPT_GROUP_ORDER: readonly PromptSectionGroup[] = [
+  "core",
+  "environment",
+  "memory",
+  "tooling",
+];
 
 export const SYSTEM_PROMPT_SECTION_CATALOG: readonly PromptSectionMeta[] = [
   {
     key: "cli-prefix",
     name: "CLI Prefix",
-    description: "Short leading identity block: You are ZCode, an interactive coding agent.",
+    group: "core",
+    description: "Short leading identity block, emitted as its own stable system message.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/cli-prefix.ts",
     contentSource: "static-const",
     injection: "system-stable",
-    control: "editor",
+    capability: "editable",
+    controlNote: "Replace the built-in text verbatim; clear the override to restore it.",
+    edit: { kind: "section-text", sectionKey: "cli-prefix" },
     defaultText: "You are ZCode, an interactive coding agent",
+    liveSourceId: "cli_prefix",
   },
   {
     key: "identity",
-    name: "Agent Identity + Security Notice",
+    name: "Agent Identity",
+    group: "core",
     description:
-      "Intro line plus the IMPORTANT refusal block (authorized testing vs destructive techniques). The block tripping jailbreak-refusals on cybersec-flavored prompts lives here; workflow-actor subagents reuse it verbatim.",
+      "Composed stable block: intro line + security notice + # Harness. Edit the notice and the harness text below; the intro line is fixed so output styles keep working.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/identity.ts",
     contentSource: "static-const",
     injection: "system-stable",
-    control: "kill-switch+editor",
+    capability: "readonly",
+    controlNote: "Composed from Security Notice and # Harness — edit those rows instead.",
+    liveSourceId: "identity",
+  },
+  {
+    key: "security-notice",
+    name: "Security Notice",
+    group: "core",
+    description:
+      "The IMPORTANT refusal block inside Agent Identity: authorized testing vs destructive techniques. Workflow-actor subagents reuse it verbatim.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/identity.ts",
+    contentSource: "settings-override",
+    injection: "system-stable",
+    capability: "editable",
+    controlNote: "Kill-switch removes it entirely; a non-empty text replaces it verbatim.",
+    edit: { kind: "security-notice-text" },
+    switchKey: "systemPromptSecurityNoticeEnabled",
+    defaultText:
+      "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.",
   },
   {
     key: "harness",
     name: "# Harness",
-    description: "Stable runtime constraints (markdown output, permission modes, hook output).",
+    group: "core",
+    description:
+      "Stable runtime constraints (markdown output, permission modes, hook output). Rendered inside the Agent Identity block.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/identity.ts",
     contentSource: "static-const",
     injection: "system-stable",
-    control: "editor",
+    capability: "editable",
+    controlNote: "Replace the built-in block verbatim; clear the override to restore it.",
+    edit: { kind: "section-text", sectionKey: "harness" },
     defaultText: `# Harness
 - Text you output outside of tool use is displayed to the user as Github-flavored markdown in a terminal.
 - Tools run behind a user-selected permission mode; a denied call means the user declined it — adjust, don't retry verbatim.
@@ -72,13 +144,31 @@ export const SYSTEM_PROMPT_SECTION_CATALOG: readonly PromptSectionMeta[] = [
 - Reference code as \`file_path:line_number\` — it's clickable.`,
   },
   {
+    key: "custom-prompt",
+    name: "Custom System Prompt (full override)",
+    group: "core",
+    description:
+      "When set, replaces the whole stable body and skips the dynamic stack. Same semantics as runtimeConfig.systemPrompt, now settable from settings.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/builder.ts (customSystemPrompt path)",
+    contentSource: "config-passthrough",
+    injection: "system-stable",
+    capability: "editable",
+    controlNote: "Non-empty replaces every default section; empty restores the default stack.",
+    edit: { kind: "custom-prompt-text" },
+    liveSourceId: "custom_system_prompt",
+  },
+  {
     key: "desktop-context",
     name: "Desktop Context",
-    description: "File/URL/link rules for the desktop surface. Desktop sessions only.",
+    group: "environment",
+    description:
+      "File/URL/link and ::code-comment rules. Desktop sessions only — absent in terminal runs.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/desktop.ts",
     contentSource: "static-const",
     injection: "system-dynamic",
-    control: "editor",
+    capability: "editable",
+    controlNote: "Replace the built-in block verbatim; clear the override to restore it.",
+    edit: { kind: "section-text", sectionKey: "desktop-context" },
     defaultText: `# ZCode Desktop Context
 
 ### Files & URLs
@@ -94,15 +184,20 @@ export const SYSTEM_PROMPT_SECTION_CATALOG: readonly PromptSectionMeta[] = [
 - file should be an absolute path or include the workspace folder segment so it can be resolved relative to the workspace.
 - Keep line ranges tight; end defaults to start.
 - Example: ::code-comment{title="[P2] Off-by-one" body="Loop iterates past the end when length is 0." file="/path/to/foo.ts" start=10 end=11 priority=2}`,
+    liveSourceId: "desktop_context",
   },
   {
     key: "dynamic-behavior",
     name: "Dynamic Behavior",
-    description: "Communication style: lead with the outcome, complete sentences, final-message rule.",
+    group: "tooling",
+    description:
+      "Communication style: lead with the outcome, complete sentences, final-message rule, confirm-before-irreversible.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/dynamic-sections.ts",
     contentSource: "static-const",
     injection: "system-dynamic",
-    control: "editor",
+    capability: "editable",
+    controlNote: "Replace the built-in block verbatim; clear the override to restore it.",
+    edit: { kind: "section-text", sectionKey: "dynamic-behavior" },
     defaultText: `# Communicating with the user
 
 Your text output is what the user reads; they usually can't see your thinking or the raw tool results. Write it for a teammate who stepped away and is catching up, not for a log file: they don't know the codenames or shorthand you created along the way, and they didn't watch your process unfold. Before your first tool call, say in a sentence what you're about to do; while working, give brief updates when you find something load-bearing or change direction.
@@ -116,38 +211,22 @@ Being readable and being concise are different things, and readable matters more
 Match the response to the question: a simple question gets a direct answer in prose, not headers and sections. Use tables only for short enumerable facts, with explanations in the surrounding prose rather than the cells. Calibrate to the user — a bit tighter for an expert, more explanatory for someone newer.
 
 Write code that reads like the surrounding code: match its comment density, naming, and idiom.
-
 Only write a code comment to state a constraint the code itself can't show — never to say where it came from, what the next line does, or why your change is correct; that's you talking to the reviewer, not the next reader, and it's noise the moment the PR merges.
 
 For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target — if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.`,
-  },
-  {
-    key: "session-guidance",
-    name: "Session Guidance",
-    description: "Tool/skill hints for this session. Absent when no tools or skills apply.",
-    sourceFile: "apps/zcode-cli/packages/core/src/context/dynamic-sections.ts",
-    contentSource: "runtime-live",
-    injection: "system-dynamic",
-    control: "none",
-  },
-  {
-    key: "memory",
-    name: "# Memory",
-    description:
-      "File-based memory usage instructions. Not the memory content itself — only how to use it.",
-    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/memory.ts",
-    contentSource: "static-const",
-    injection: "system-dynamic",
-    control: "kill-switch",
+    liveSourceId: "dynamic_behavior",
   },
   {
     key: "context-management",
     name: "Context Management",
-    description: "Compaction/summarization rules for long conversations.",
+    group: "tooling",
+    description: "Compaction/summarization rules and the autonomous-execution contract.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/dynamic-sections.ts",
     contentSource: "static-const",
     injection: "system-dynamic",
-    control: "editor",
+    capability: "editable",
+    controlNote: "Replace the built-in block verbatim; clear the override to restore it.",
+    edit: { kind: "section-text", sectionKey: "context-management" },
     defaultText: `# Context management
 When the conversation grows long, some or all of the current context is summarized; the summary, along with any remaining unsummarized context, is provided in the next context window so work can continue — you don't need to wrap up early or hand off mid-task.
 
@@ -160,69 +239,124 @@ Exception: when the user is describing a problem, asking a question, or thinking
 Before ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide.
 
 Before running a command that changes system state — restarts, deletes, config edits — check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.`,
+    liveSourceId: "context_management",
+  },
+  {
+    key: "session-guidance",
+    name: "Session Guidance",
+    group: "tooling",
+    description: "Tool/skill hints for this session. Absent when no tools or skills apply.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/dynamic-sections.ts",
+    contentSource: "runtime-live",
+    injection: "system-dynamic",
+    capability: "readonly",
+    controlNote: "Session-scoped: depends on the tools and skills of the running session.",
+    liveSourceId: "session_guidance",
+    sessionOnly: true,
   },
   {
     key: "output-style",
     name: "Output Style",
+    group: "tooling",
     description: "Active output-style prompt. Absent when no style is set.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/dynamic-sections.ts",
     contentSource: "config-passthrough",
     injection: "system-dynamic",
-    control: "none",
-  },
-  {
-    key: "git-context",
-    name: "Git System Context",
-    description: "Branch/status/commits snapshot at session start. Repo workspaces only.",
-    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/env-info.ts",
-    contentSource: "runtime-live",
-    injection: "system-dynamic",
-    control: "none",
+    capability: "readonly",
+    controlNote: "Session-scoped: set from the session's output style, not from global settings.",
+    liveSourceId: "output_style",
+    sessionOnly: true,
   },
   {
     key: "skills",
     name: "Skills Listing",
-    description: "Invocable skills for this session, as a meta-user attachment.",
+    group: "tooling",
+    description: "Invocable skills for this session, attached as a meta-user block.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/skills.ts",
     contentSource: "runtime-live",
     injection: "meta-user",
-    control: "none",
+    capability: "readonly",
+    controlNote: "Session-scoped: built from the skills discovered for the running session.",
+    liveSourceId: "skills",
+    sessionOnly: true,
   },
   {
-    key: "agents-md",
-    name: "# agentsMd",
-    description:
-      "Workspace AGENTS.md (walk-up from cwd) plus ~/.zcode/AGENTS.md plus the MEMORY.md project index. Files on disk are the source of truth — edit them in place.",
-    sourceFile:
-      "apps/zcode-cli/packages/core/src/context/sections/request-user-context.ts + apps/zcode-cli/packages/adapters/src/context/index.ts",
-    contentSource: "files-on-disk",
-    injection: "meta-user",
-    control: "kill-switch",
+    key: "env-info",
+    name: "# Environment",
+    group: "environment",
+    description: "Working directory, platform, shell, OS version, git repository flag.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/env-info.ts",
+    contentSource: "runtime-live",
+    injection: "system-dynamic",
+    capability: "readonly",
+    controlNote: "Resolved from the host environment on every assembly; not text you can replace.",
+    liveSourceId: "env_info",
+  },
+  {
+    key: "git-context",
+    name: "Git System Context",
+    group: "environment",
+    description: "Branch/status/commits snapshot at session start. Repo workspaces only.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/env-info.ts",
+    contentSource: "runtime-live",
+    injection: "system-dynamic",
+    capability: "readonly",
+    controlNote: "Read from git at assembly time; the preview shows the current snapshot.",
+    liveSourceId: "system_context",
   },
   {
     key: "current-date",
     name: "Current Date",
-    description: "Today's date, resolved per session.",
+    group: "environment",
+    description: "Today's date, resolved per assembly.",
     sourceFile: "apps/zcode-cli/packages/core/src/context/sections/current-date.ts",
     contentSource: "runtime-live",
     injection: "meta-user",
-    control: "none",
+    capability: "readonly",
+    controlNote: "Resolved from the host clock; nothing to configure.",
+    liveSourceId: "current_date",
   },
   {
-    key: "custom-prompt",
-    name: "Custom System Prompt (full override)",
+    key: "memory",
+    name: "# Memory",
+    group: "memory",
     description:
-      "When set, replaces the whole stable body and skips the dynamic stack. Same semantics as runtimeConfig.systemPrompt, now settable from settings.",
-    sourceFile: "apps/zcode-cli/packages/core/src/context/builder.ts (customSystemPrompt path)",
-    contentSource: "config-passthrough",
-    injection: "system-stable",
-    control: "editor",
+      "File-based memory usage instructions, written for the resolved project memory root. Not the memory content itself — only how to use it.",
+    sourceFile: "apps/zcode-cli/packages/core/src/context/sections/memory.ts",
+    contentSource: "static-const",
+    injection: "system-dynamic",
+    capability: "switch",
+    controlNote: "Kill-switch drops the whole section; its text is generated per memory root.",
+    switchKey: "systemPromptAutoMemoryEnabled",
+    liveSourceId: "memory",
+  },
+  {
+    key: "agents-md",
+    name: "# agentsMd",
+    group: "memory",
+    description:
+      "Workspace AGENTS.md (walk-up from cwd to the git root) plus the user-global AGENTS.md plus the MEMORY.md project index. Files on disk are the source of truth — edit them in place.",
+    sourceFile:
+      "apps/zcode-cli/packages/core/src/context/sections/request-user-context.ts + apps/zcode-cli/packages/adapters/src/context/index.ts",
+    contentSource: "files-on-disk",
+    injection: "meta-user",
+    capability: "switch",
+    controlNote: "Kill-switch drops the section even when files resolve; the files themselves are edited on disk.",
+    switchKey: "systemPromptAgentsMdEnabled",
+    liveSourceId: "request_user_context",
   },
 ];
 
 /** AGENTS.md resolution order, mirroring adapters/src/context/index.ts. */
 export const AGENTS_MD_RESOLUTION_ORDER: readonly string[] = [
-  "<workspace>/AGENTS.md (walk-up from session cwd to project root)",
-  "~/.zcode/AGENTS.md (user default)",
+  "<workspace>/AGENTS.md (walk-up from the workspace directory to the git root)",
+  "user-global AGENTS.md (~/.zcode/AGENTS.md, or ~/.blackbird/AGENTS.md on Blackbird builds)",
   "<memoryRoot>/MEMORY.md (project memory index, appended in the same section)",
 ] as const;
+
+/** Catalog row for a ContextBuilder section id; undefined for unknown/session-only ids. */
+export function findCatalogSectionByLiveSourceId(
+  liveSourceId: string,
+): PromptSectionMeta | undefined {
+  return SYSTEM_PROMPT_SECTION_CATALOG.find((section) => section.liveSourceId === liveSourceId);
+}

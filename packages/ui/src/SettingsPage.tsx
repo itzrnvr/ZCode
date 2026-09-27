@@ -72,6 +72,7 @@ import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSectio
 import { MemorySettingsSection } from "@/settings/MemorySettingsSection.js";
 // Fork: system-prompt kill-switches UI (single import line).
 import { SystemPromptSection } from "@/settings/SystemPromptSection.js";
+import { buildAutomationWorkspaceOptions } from "@/settings/automationWorkspaceOptions.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
@@ -681,6 +682,18 @@ export function SettingsPage({
     return [...names];
   }, [sharedSettings?.recentProjects, workspaceTabs]);
   const memoryEnabled = sharedSettings?.memoryEnabled === true;
+  // Fork: system-prompt preview picker — preview any open workspace, not only the active one.
+  const systemPromptWorkspaceOptions = useMemo(
+    () =>
+      buildAutomationWorkspaceOptions(workspaceTabs).map(
+        ({ workspacePath, workspaceIdentity, label }) => ({
+          workspacePath,
+          ...(workspaceIdentity ? { workspaceIdentity } : {}),
+          label,
+        }),
+      ),
+    [workspaceTabs],
+  );
   const nativeSearchEnhancementsEnabled = sharedSettings?.nativeSearchEnhancementsEnabled !== false;
   const askUserQuestionAutoResolutionEnabled =
     sharedSettings?.askUserQuestionAutoResolutionEnabled !== false;
@@ -1840,6 +1853,8 @@ export function SettingsPage({
                             settings={sharedSettings}
                             onUpdate={updateSharedSettings}
                             workspacePath={activeWorkspacePath ?? captionWorkspacePath ?? undefined}
+                            workspaceIdentity={activeWorkspaceIdentity}
+                            workspaces={systemPromptWorkspaceOptions}
                           />
                         ) : activeSection === "plugin" ? (
                           <PluginsSection

@@ -52,6 +52,7 @@ import {
   readWorkspacePresentation,
   testProviderModelConnectivity,
 } from "./workspace-model-runtime.js";
+import { previewWorkspaceSystemPrompt } from "./system-prompt-preview.js";
 import {
   addPluginMarketplace,
   configurePlugin,
@@ -604,6 +605,8 @@ export class ZCodeProtocolAgentServer {
         return await closeSession(this.context, request.params);
       case zcodeProtocolMethods.workspaceReadPresentation:
         return await readWorkspacePresentation(this.context, request.params);
+      case zcodeProtocolMethods.workspaceSystemPromptPreview:
+        return await previewWorkspaceSystemPrompt(this.context, request.params);
       case zcodeProtocolMethods.workspaceHookTrustGrant: {
         const grantResult = await grantWorkspaceHookTrustForProtocol(request.params, {
           appVersion: this.context.deps.version,

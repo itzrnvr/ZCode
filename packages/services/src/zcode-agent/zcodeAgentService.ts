@@ -93,6 +93,7 @@ import {
   zcodeStateUpdatedNotificationSchema,
   zcodeUserInputRequestParamsSchema,
   zcodeWorkspacePresentationSchema,
+  zcodeWorkspaceSystemPromptPreviewResultSchema,
   zcodeWorkspaceCancelGenerateTextResultSchema,
   zcodeWorkspaceGenerateTextResultSchema,
   zcodeWorkspaceHookTrustGrantResultSchema,
@@ -157,6 +158,7 @@ import type {
   ZCodeAgentListSessionsParams,
   ZCodeAgentListSessionSubagentsParams,
   ZCodeAgentReadWorkspacePresentationParams,
+  ZCodeAgentSystemPromptPreviewParams,
   ZCodeAgentReadSessionEventsParams,
   ZCodeAgentReadSessionMessagesParams,
   ZCodeAgentReadSessionParams,
@@ -3800,6 +3802,22 @@ export function createZCodeAgentService(
         });
         throw error;
       }
+    },
+
+    async readWorkspaceSystemPromptPreview(params: ZCodeAgentSystemPromptPreviewParams) {
+      // 预览必须反映真正的运行面：desktop host 才带 Desktop Context 段，
+      // 该事实由 Host 装配时解析（resolveZCodeAgentPresentationSurface），不能让 Renderer 自报。
+      const presentationSurface = options?.presentationSurface;
+      const client = await getReadOnlyClient(params);
+      return client.request(
+        zcodeProtocolMethods.workspaceSystemPromptPreview,
+        {
+          workspace: buildWorkspaceRef(params),
+          ...(params.overrides ? { overrides: params.overrides } : {}),
+          ...(presentationSurface === "desktop" ? { presentationSurface: "zcode_desktop" as const } : {}),
+        },
+        zcodeWorkspaceSystemPromptPreviewResultSchema,
+      );
     },
 
     async grantWorkspaceHookTrust(params: ZCodeAgentGrantWorkspaceHookTrustParams) {
