@@ -25,12 +25,7 @@ import {
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
 import { applyUiFontSizePx, loadUiFontSizePx, writeUiFontSizePx } from "@/lib/uiFontSize.js";
-import {
-  applyPointerCursors,
-  loadPointerCursors,
-  normalizePointerCursors,
-  writePointerCursors,
-} from "@/lib/pointerCursors.js";
+import { applyPointerCursors, loadPointerCursors, writePointerCursors } from "@/lib/pointerCursors.js";
 import { applyUiColors, loadUiColors, writeUiColors, type UiColors } from "@/lib/uiColors.js";
 import {
   isTaskNotificationEnabled,
@@ -40,6 +35,12 @@ import {
 } from "@/lib/taskNotificationPreferences.js";
 import type { Theme } from "../useTheme.js";
 import { applyTheme, normalizeThemePreference, resolveTheme } from "../useTheme.js";
+import {
+  applyBroadcastField,
+  BROADCAST_STATE_FIELDS,
+  broadcastFieldOfMessage,
+  STATE_CHANNEL_PREFIX,
+} from "./stateBroadcast.js";
 
 import {
   INTERFACE_MODE_STORAGE_KEY,
@@ -220,26 +221,6 @@ export interface ZCodeState {
 // ============================================================================
 // 需要广播的字段 —— 只有这些字段的变更会发送给其他窗口
 // ============================================================================
-
-const BROADCAST_FIELDS = new Set([
-  "theme",
-  "locale",
-  "uiFontSizePx",
-  "uiColors",
-  "pointerCursors",
-  "interfaceMode",
-]);
-
-type BroadcastField =
-  | "theme"
-  | "locale"
-  | "uiFontSizePx"
-  | "uiColors"
-  | "pointerCursors"
-  | "interfaceMode";
-
-/** 广播频道名前缀 */
-const STATE_CHANNEL_PREFIX = "state:";
 
 // ============================================================================
 // Store 创建工厂
@@ -470,7 +451,7 @@ export function createZCodeStore(
       return;
     }
 
-    for (const field of BROADCAST_FIELDS as Set<BroadcastField>) {
+    for (const field of BROADCAST_STATE_FIELDS) {
       if (state[field] === prevState[field]) {
         continue;
       }
@@ -492,31 +473,13 @@ export function createZCodeStore(
       return;
     }
 
-    if (!msg.channel.startsWith(STATE_CHANNEL_PREFIX)) return;
-
-    const field = msg.channel.slice(STATE_CHANNEL_PREFIX.length) as BroadcastField;
-    if (!BROADCAST_FIELDS.has(field)) return;
+    const field = broadcastFieldOfMessage(msg);
+    if (!field) return;
 
     applyingBroadcast = true;
     try {
       // 调用对应的 setter，确保副作用（localStorage、DOM）也执行
-      const state = useStore.getState();
-      if (field === "theme" && typeof msg.payload === "string") {
-        state.setTheme(msg.payload as Theme);
-      } else if (field === "locale" && typeof msg.payload === "string") {
-        state.setLocale(msg.payload);
-      } else if (
-        field === "interfaceMode" &&
-        (msg.payload === "office" || msg.payload === "coding")
-      ) {
-        state.setInterfaceMode(normalizeInterfaceMode(msg.payload));
-      } else if (field === "uiFontSizePx" && typeof msg.payload === "number") {
-        state.setUiFontSizePx(msg.payload);
-      } else if (field === "uiColors") {
-        state.setUiColors(msg.payload as UiColors);
-      } else if (field === "pointerCursors") {
-        state.setPointerCursors(normalizePointerCursors(msg.payload));
-      }
+      applyBroadcastField(useStore.getState(), field, msg.payload);
     } finally {
       applyingBroadcast = false;
     }
