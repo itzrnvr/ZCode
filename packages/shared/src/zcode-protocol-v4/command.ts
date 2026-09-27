@@ -157,8 +157,15 @@ export const commandPayloadSchemas = {
     attachments: z.array(attachmentRefSchema).optional(),
     // 缺省 preserve：仅切 conversation branch；rewind 会先安全恢复该轮文件。
     workspaceMode: z.enum(["preserve", "rewind"]).optional(),
+    // 用户在 Composer 选中的新模型随编辑冻结提交；缺省回退 runtime 解析
+    // （旧客户端不携带时行为不变）。
+    modelSelection: modelSelectionSchema.optional(),
   }),
-  retryTurn: z.object({ target: conversationRowTargetSchema }),
+  retryTurn: z.object({
+    target: conversationRowTargetSchema,
+    // retry 重发原 canonical 输入，但模型以用户当前选择为准；缺省回退 runtime 解析。
+    modelSelection: modelSelectionSchema.optional(),
+  }),
   setAssistantFeedback: z.object({
     target: conversationRowTargetSchema,
     feedback: z.enum(["like", "dislike"]).nullable(),

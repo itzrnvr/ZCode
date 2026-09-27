@@ -9,6 +9,7 @@ import type {
   CommandPayloadMap,
   CommandResult,
 } from "@zcode/shared/zcode-protocol-v4";
+import type { ModelSelection } from "@zcode/shared";
 import {
   RewindStrategy,
   traceContextToLogContext,
@@ -215,6 +216,7 @@ async function editUserQuery(
     payload.newText,
     attachmentRefs,
     attachments,
+    payload.modelSelection,
   );
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
   // 无法与 retry 稳定区分。命令副作用完成后由 Agent server 写低频 info 审计索引。
@@ -269,6 +271,7 @@ async function retryTurn(
     resolution.editTarget.intent.text,
     attachmentRefs,
     attachments,
+    payload.modelSelection,
   );
   return undefined;
 }
@@ -343,6 +346,7 @@ async function startCanonicalIntent(
   text: string,
   attachmentRefs: ReturnType<typeof stableAttachmentRefs>,
   attachments: Awaited<ReturnType<typeof mapAttachmentRefsToTurnAttachments>>,
+  modelSelection: ModelSelection | undefined,
 ): Promise<void> {
   const intent = inputIntentMetadataFromCanonical(
     envelope,
@@ -355,10 +359,11 @@ async function startCanonicalIntent(
       requestedDelivery: editTarget.intent.requestedDelivery,
       admittedDelivery: editTarget.intent.admittedDelivery,
       fallbackReasonCode: editTarget.intent.fallbackReasonCode,
-      // edit/retry carries no fresh user pin (UI sends target+text only); the
-      // canonical copy would otherwise resurrect the stale TurnStarted model
-      // and core persists it back into the session. Run on live selection.
-      modelSelection: resolveEditRetryModelSelection(record, editTarget.intent.modelSelection),
+      // payload（Composer 点击时刻冻结的选择）优先；旧客户端不携带时回退 runtime
+      // 解析——canonical 副本会复活 TurnStarted 的旧 pin，并由 core 持久化回会话。
+      modelSelection:
+        modelSelection ??
+        resolveEditRetryModelSelection(record, editTarget.intent.modelSelection),
       mode: editTarget.intent.mode,
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,

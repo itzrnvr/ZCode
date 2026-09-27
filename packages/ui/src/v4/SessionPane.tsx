@@ -3058,6 +3058,10 @@ export function SessionPane({
         logger.warn("[v4-pane] edit 跳过：行内编辑内容为空且无附件");
         return false;
       }
+      // 与 sendText 同一份点击时刻的冻结配置：edit 重跑必须用 Composer 里
+      // 当前选中的模型，而不是上一轮的 Session pin。未就绪（null）时不携带，
+      // CLI 回退 runtime 解析（旧行为）。
+      const submission = createSubmissionFromComposer();
       const ack = await dispatchCommand(
         "editUserQuery",
         {
@@ -3067,6 +3071,7 @@ export function SessionPane({
           // editUserQuery 的 attachments 缺省表示保留 canonical 原附件；
           // 只有显式透传 []，CLI 才能区分“用户删除全部”与“调用方未修改附件”。
           ...(attachments ? { attachments: [...attachments] } : {}),
+          ...(submission ? { modelSelection: submission.modelSelection } : {}),
         },
         sessionId,
         current.revision,
@@ -3079,7 +3084,7 @@ export function SessionPane({
       // fork ACK 只做旧协议解码兼容；新 edit 永不导航 child。blocked 由行内冲突弹窗处理。
       return ack;
     },
-    [dispatchCommand, sessionId],
+    [createSubmissionFromComposer, dispatchCommand, sessionId],
   );
 
   const dispatchRetryTurn = useCallback(
@@ -3088,16 +3093,21 @@ export function SessionPane({
       if (!sessionId || current === null) {
         throw new Error("retryTurn 缺少当前 session 投影");
       }
+      // 与 sendText 同源的冻结模型选择：retry 用 Composer 当前模型重跑。
+      const submission = createSubmissionFromComposer();
       // retryTurn 是 CAS 命令：baseRevision 取当前投影 revision。
       return dispatchCommand(
         "retryTurn",
-        { target },
+        {
+          target,
+          ...(submission ? { modelSelection: submission.modelSelection } : {}),
+        },
         sessionId,
         current.revision,
         current.logEpoch,
       );
     },
-    [dispatchCommand, sessionId],
+    [createSubmissionFromComposer, dispatchCommand, sessionId],
   );
 
   const handleRetry = useCallback(
