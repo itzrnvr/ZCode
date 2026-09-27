@@ -75,11 +75,12 @@ export async function loadPersistedConversationMaterialization(input: {
   const [session, allMessages, target, entries] = await Promise.all([
     input.store.getSession(sessionID),
     // perf: 三档来源都受同一 500 行界约束——调用方传入的 persistedMessages 已是 resume
-    // 路径的尾读结果，复用它可以省掉一次重复读；未传时才回落到同界尾读；两者都不可用的
+    // 路径的尾读结果，非空时直接复用可省掉一次重复读；空数组表示该路径没有可用尾读
+    // （如尚未激活的会话），必须回落到同界尾读，否则会渲染成空会话。两者都不可用的
     // 旧 store 才保留全量读取（无尾读能力时不得改变行为）。
-    input.persistedMessages ??
-      input.store.messagesTail?.({ sessionID, limit: 500 }) ??
-      input.store.messages({ sessionID }),
+    input.persistedMessages?.length
+      ? input.persistedMessages
+      : (input.store.messagesTail?.({ sessionID, limit: 500 }) ?? input.store.messages({ sessionID })),
     input.store.readTarget({ sessionID }),
     input.store.sessionEntries ? input.store.sessionEntries({ sessionID }) : Promise.resolve([]),
   ]);
