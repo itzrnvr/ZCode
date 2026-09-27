@@ -2272,13 +2272,15 @@ export function createLocalServices(options: {
               ...(settings.systemPromptCustomText?.trim()
                 ? { systemPromptCustomText: settings.systemPromptCustomText }
                 : {}),
-              // Fork: per-section overrides. Only non-empty values cross the wire.
-              ...(settings.systemPromptSectionTexts &&
-              Object.values(settings.systemPromptSectionTexts).some((v) => v?.trim())
+              // Fork: per-section overrides. A defined map is authoritative and complete:
+              // non-empty entries replace the applied overrides, an empty map clears them.
+              // Omitted only for legacy settings without the field (keep current).
+              ...(settings.systemPromptSectionTexts !== undefined
                 ? {
                     systemPromptSectionTexts: Object.fromEntries(
                       Object.entries(settings.systemPromptSectionTexts).filter(
-                        ([, v]) => typeof v === "string" && v.trim(),
+                        (entry): entry is [string, string] =>
+                          typeof entry[1] === "string" && entry[1].trim().length > 0,
                       ),
                     ),
                   }

@@ -24,6 +24,10 @@
 //   (cli-prefix, harness, desktop-context, dynamic-behavior, context-management).
 //   A non-empty value replaces that section's default text verbatim, so each
 //   prompt block is individually editable instead of requiring a full override.
+//   When supplied, the map is authoritative and complete: it replaces the applied
+//   overrides wholesale (filtered to non-empty values), so dropping a key or
+//   blanking its text restores that section's default. An absent field is a legacy
+//   caller and keeps the overrides already in effect.
 //
 // Wiring (single integration points, documented in CLAUDE.md):
 // - sections/identity.ts: reads getSystemPromptSwitches() before emitting the block
@@ -67,6 +71,13 @@ export function getSectionTextOverride(key: SystemPromptSectionKey): string | un
   return text ? raw : undefined;
 }
 
+/**
+ * Applies a patch to the process-global switch state.
+ *
+ * A supplied `sectionTexts` map is authoritative: its non-empty entries replace
+ * the current set wholesale, so dropping a key (or blanking a value) clears that
+ * override. `undefined` means the caller predates the field and changes nothing.
+ */
 export function setSystemPromptSwitches(patch: Partial<SystemPromptSwitches>): void {
   if (typeof patch.securityNoticeEnabled === "boolean") {
     state.securityNoticeEnabled = patch.securityNoticeEnabled;
@@ -98,9 +109,10 @@ export function setSystemPromptSwitches(patch: Partial<SystemPromptSwitches>): v
         (cleaned as Record<string, string>)[key] = value;
       }
     }
+    // Replace, never merge: a dropped key or blank value means "default again".
     if (Object.keys(cleaned).length > 0) {
-      state.sectionTexts = { ...state.sectionTexts, ...cleaned };
-    } else if (patch.sectionTexts && Object.keys(patch.sectionTexts).length === 0) {
+      state.sectionTexts = cleaned;
+    } else {
       delete state.sectionTexts;
     }
   }

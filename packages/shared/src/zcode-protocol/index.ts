@@ -1713,7 +1713,10 @@ export const zcodeSessionRuntimePreferencesResultSchema = z
     // Fork: custom prompt texts. Absent/empty = upstream default.
     systemPromptSecurityNoticeText: z.string().max(8000).optional(),
     systemPromptCustomText: z.string().max(20000).optional(),
-    // Fork: per-section overrides keyed by section key. Absent = defaults.
+    // Fork: per-section overrides keyed by section key. Optional on purpose: absence
+    // means "keep the overrides currently in effect" (legacy host), while a present map
+    // is authoritative and complete — an empty one clears every override. Never give
+    // this a default, or absence would silently arrive as an empty map and wipe them.
     systemPromptSectionTexts: z.record(z.string(), z.string().max(20000)).optional(),
     integratedTerminalShell: integratedTerminalShellSelectionSchema.optional(),
     // 兼容旧 Host：缺少字段时在协议解析边界使用当前默认策略。
