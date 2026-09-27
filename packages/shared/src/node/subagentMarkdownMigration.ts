@@ -3,6 +3,7 @@ import { chmod, lstat, readFile, readdir, realpath, rename, rm, writeFile } from
 import { basename, dirname, join } from "node:path";
 import { migrateSubagentMarkdownProvider } from "../subagent-markdown-selection.js";
 import { importSubagentStateSelections } from "../subagent-state-migration.js";
+import { SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES } from "../skill-scan-policy.js";
 import { withFileLock } from "./privateFilePersistence.js";
 
 interface SubagentMarkdownMigrationResult {
@@ -77,8 +78,14 @@ export async function migrateUserSubagentMarkdown(
       if (!rootStat.isDirectory()) return;
       for (const entry of await readdir(directory, { withFileTypes: true })) {
         const path = join(directory, entry.name);
-        if (entry.isDirectory()) await visit(path);
-        else if (entry.isFile() && /\.(md|markdown)$/iu.test(entry.name)) {
+        if (entry.isDirectory()) {
+          // 依赖/构建目录里没有用户 agent Markdown；用户 agent 根下的插件
+          // node_modules 有上千个 README/LICENSE.md，逐个读取会把每次冷启动的
+          // 迁移扫描拖到 ~0.7s。复用技能扫描的内容目录排除名单（点目录不排除，
+          // 迁移是一次性修正，旧文件放在点目录里也要被处理）。
+          if (SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES.has(entry.name)) continue;
+          await visit(path);
+        } else if (entry.isFile() && /\.(md|markdown)$/iu.test(entry.name)) {
           try {
             if (await migrateFile(path, migrateSubagentMarkdownProvider))
               result.migrated.push(path);
