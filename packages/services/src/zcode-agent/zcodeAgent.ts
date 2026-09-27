@@ -63,6 +63,8 @@ import type {
   ZCodeWorkspaceGenerateTextResult,
   ZCodeWorkspaceGenerateTextParams,
   ZCodeWorkspaceHookTrustGrantResult,
+  ZCodeWorkspaceSystemPromptPreviewOverrides,
+  ZCodeWorkspaceSystemPromptPreviewResult,
   ZCodeAutomationBotDeliveryTarget,
 } from "@zcode/shared";
 import type {
@@ -245,6 +247,11 @@ export interface ZCodeAgentReadSessionEventsParams extends ZCodeAgentSessionTarg
 }
 
 export type ZCodeAgentReadWorkspacePresentationParams = ZCodeAgentWorkspaceTarget;
+
+/** 设置页系统提示词预览：workspace 目标 + 待应用的 prompt 开关/文本覆盖。 */
+export interface ZCodeAgentSystemPromptPreviewParams extends ZCodeAgentWorkspaceTarget {
+  overrides?: ZCodeWorkspaceSystemPromptPreviewOverrides;
+}
 
 export interface ZCodeAgentGrantWorkspaceHookTrustParams extends ZCodeAgentWorkspaceTarget {
   bundleDigest: string;
@@ -600,6 +607,10 @@ export interface IZCodeAgentService {
   readWorkspacePresentation(
     params: ZCodeAgentReadWorkspacePresentationParams,
   ): Promise<ZCodeWorkspacePresentation>;
+  /** 设置页预览：Host 侧真实解析 AGENTS.md 并组装 system prompt（只读，不写设置）。 */
+  readWorkspaceSystemPromptPreview(
+    params: ZCodeAgentSystemPromptPreviewParams,
+  ): Promise<ZCodeWorkspaceSystemPromptPreviewResult>;
   /** 无 task/session 的 Settings 预信任；Agent 会重新发现并校验 canonical snapshot。 */
   grantWorkspaceHookTrust(
     params: ZCodeAgentGrantWorkspaceHookTrustParams,

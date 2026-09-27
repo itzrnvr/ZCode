@@ -2019,6 +2019,70 @@ export const zcodeWorkspacePresentationSchema = z
   })
   .strict();
 export type ZCodeWorkspacePresentation = z.infer<typeof zcodeWorkspacePresentationSchema>;
+/**
+ * 设置页系统提示词预览：Host 在请求的 workspace 上解析指令文件并真实组装一次 prompt。
+ * overrides 缺省时按 CLI 默认（全部开关开启、无自定义文本）组装；字段语义与
+ * session/requestRuntimePreferences 的 systemPrompt* 完全一致，避免两套契约漂移。
+ */
+export const zcodeWorkspaceSystemPromptPreviewOverridesSchema = z
+  .object({
+    securityNoticeEnabled: z.boolean().optional(),
+    autoMemoryEnabled: z.boolean().optional(),
+    agentsMdEnabled: z.boolean().optional(),
+    securityNoticeText: z.string().max(8000).optional(),
+    customText: z.string().max(20000).optional(),
+    sectionTexts: z.record(z.string(), z.string().max(20000)).optional(),
+    /** 与 memoryEnabled prefs 同源；缺席按 CLI 默认（未显式关闭）。 */
+    memoryEnabled: z.boolean().optional(),
+  })
+  .strict();
+export type ZCodeWorkspaceSystemPromptPreviewOverrides = z.infer<
+  typeof zcodeWorkspaceSystemPromptPreviewOverridesSchema
+>;
+export const zcodeWorkspaceSystemPromptPreviewParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    overrides: zcodeWorkspaceSystemPromptPreviewOverridesSchema.optional(),
+    /** Host 解析的运行面事实；缺席按 terminal（不注入 Desktop Context 段）。 */
+    presentationSurface: z.enum(["terminal", "zcode_desktop"]).optional(),
+  })
+  .strict();
+export type ZCodeWorkspaceSystemPromptPreviewParams = z.infer<
+  typeof zcodeWorkspaceSystemPromptPreviewParamsSchema
+>;
+/** 真实解析结果：walk-up 后的 workspace AGENTS.md 与 ~/.zcode（或 ~/.blackbird）AGENTS.md。 */
+export const zcodeWorkspaceSystemPromptPreviewInstructionFileSchema = z
+  .object({
+    path: z.string().min(1),
+    scope: z.enum(["workspace", "user"]),
+    content: z.string(),
+    truncated: z.boolean(),
+  })
+  .strict();
+export const zcodeWorkspaceSystemPromptPreviewSectionSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+    text: z.string(),
+    target: z.enum(["system", "meta_user"]),
+    cache: z.enum(["stable", "dynamic"]),
+    chars: z.number().int().nonnegative(),
+    tokens: z.number().int().nonnegative(),
+  })
+  .strict();
+export const zcodeWorkspaceSystemPromptPreviewResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    workingDirectory: z.string().min(1),
+    instructionFiles: z.array(zcodeWorkspaceSystemPromptPreviewInstructionFileSchema),
+    sections: z.array(zcodeWorkspaceSystemPromptPreviewSectionSchema),
+    totalChars: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ZCodeWorkspaceSystemPromptPreviewResult = z.infer<
+  typeof zcodeWorkspaceSystemPromptPreviewResultSchema
+>;
 const workspaceHookSha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const zcodeWorkspaceHookTrustGrantParamsSchema = z
   .object({
@@ -3611,6 +3675,7 @@ export const zcodeProtocolMethods = {
   sessionSetThoughtLevel: "session/setThoughtLevel",
   sessionSetMode: "session/setMode",
   workspaceReadPresentation: "workspace/readPresentation",
+  workspaceSystemPromptPreview: "workspace/systemPromptPreview",
   workspaceHookTrustGrant: "workspace/hooks/trustGrant",
   // 进程级 Account Provider Config 与 workspace 运行目录分离。
   providerUpdateAccountConfig: "provider/updateAccountConfig",

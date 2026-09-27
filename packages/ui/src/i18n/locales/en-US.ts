@@ -2177,6 +2177,53 @@ const enUS: Record<string, string> = {
   "settings.systemPrompt.customTextPlaceholder":
     "Leave empty for the default assembled prompt…",
   "settings.systemPrompt.catalogTitle": "All prompt sections",
+  "settings.systemPrompt.workspaceLabel": "Preview workspace",
+  "settings.systemPrompt.workspaceHint":
+    "Resolve AGENTS.md and assemble the prompt for this workspace. Defaults to the active workspace.",
+  "settings.systemPrompt.workspaceScopeHint":
+    "The preview runs in the workspace's own agent process; switches and texts above apply to every workspace.",
+  "settings.systemPrompt.workspaceMissing":
+    "Open a workspace to resolve AGENTS.md and preview the assembled prompt. The switches and texts above are global and apply everywhere.",
+  "settings.systemPrompt.group.core": "Core",
+  "settings.systemPrompt.group.environment": "Environment",
+  "settings.systemPrompt.group.memory": "Memory",
+  "settings.systemPrompt.group.tooling": "Tooling",
+  "settings.systemPrompt.capability.editable": "Editable",
+  "settings.systemPrompt.capability.switch": "Switch",
+  "settings.systemPrompt.capability.readonly": "Read-only",
+  "settings.systemPrompt.sessionOnlyBadge": "Session-only",
+  "settings.systemPrompt.switchReference": "Controlled by the {name} switch above.",
+  "settings.systemPrompt.editorHint":
+    "Non-empty replaces the built-in text verbatim; empty restores it.",
+  "settings.systemPrompt.editorStorageHint":
+    "Saves on pause or blur; the built-in text stays the default until you change it.",
+  "settings.systemPrompt.editorSaving": "Saving…",
+  "settings.systemPrompt.editorSaved": "Saved automatically.",
+  "settings.systemPrompt.resetToDefault": "Reset to default",
+  "settings.systemPrompt.clearOverride": "Clear override",
+  "settings.systemPrompt.agentsMdFilesTitle": "AGENTS.md files",
+  "settings.systemPrompt.agentsMdFilesHint":
+    "Resolved on the host exactly as a session resolves them — walk-up from the workspace to the git root, plus the user-global file. Edit them on disk; nothing here writes to them.",
+  "settings.systemPrompt.agentsMdNone":
+    "No AGENTS.md resolved for this workspace. The host checked:",
+  "settings.systemPrompt.agentsMdScope.workspace": "workspace",
+  "settings.systemPrompt.agentsMdScope.user": "user-global",
+  "settings.systemPrompt.agentsMdTruncated": "truncated",
+  "settings.systemPrompt.previewTitle": "Preview system prompt",
+  "settings.systemPrompt.previewHint":
+    "Assembled by the CLI for this workspace, in injection order. Session-only sections (skills, output style, guidance) appear in real turns but not here.",
+  "settings.systemPrompt.previewTotals": "{chars} chars · ~{tokens} tokens",
+  "settings.systemPrompt.previewTarget.system": "system",
+  "settings.systemPrompt.previewTarget.metaUser": "meta-user",
+  "settings.systemPrompt.previewCache.stable": "stable",
+  "settings.systemPrompt.previewCache.dynamic": "dynamic",
+  "settings.systemPrompt.previewLoading": "Assembling the prompt…",
+  "settings.systemPrompt.previewError": "Could not load the assembled prompt: {message}",
+  "settings.systemPrompt.previewEmpty": "The builder returned no sections for this workspace.",
+  "settings.systemPrompt.previewRefresh": "Refresh",
+  "settings.systemPrompt.previewSessionOnlyTitle": "Not part of this preview",
+  "settings.systemPrompt.previewSessionOnlyHint":
+    "Session-scoped sections: {sections}. They resolve per running session and are never part of a workspace preview.",
   "settings.memory.workspaceMemory": "Workspace Memory",
   "settings.memoryDescription":
     "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",
