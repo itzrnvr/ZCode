@@ -1,5 +1,5 @@
-import { app, Menu, Tray } from "electron";
-import { join } from "node:path";
+import { Menu, Tray } from "electron";
+import { resolveIconPath } from "./forkIconPath.js";
 import {
   DesktopCommandIds,
   desktopMenuMessageIds,
@@ -13,9 +13,7 @@ let desktopTray: Tray | null = null;
 let rebuildDesktopTrayContextMenu: (() => void) | null = null;
 
 function resolveDesktopTrayIconPath() {
-  return app.isPackaged
-    ? join(process.resourcesPath, "tray_icon.ico")
-    : join(import.meta.dirname, "../../build/icon.ico");
+  return resolveIconPath("tray_icon.ico", "icon.ico");
 }
 
 export function createWindowsDesktopTray(options: {

@@ -161,6 +161,7 @@ import {
   runtimeUserDataPath,
   shouldUseElectronDefaultUserDataPath,
 } from "./desktopRuntimeEnv.js";
+import { resolveIconPath } from "./forkIconPath.js";
 import {
   disposeHostProcess,
   disposeHostProcessAndWait,
@@ -277,19 +278,11 @@ process.on("unhandledRejection", (reason) => {
   logger.error("unhandledRejection:", reason);
 });
 
-const iconPath =
-  process.platform === "win32"
-    ? app.isPackaged
-      ? join(process.resourcesPath, "icon_windows.png")
-      : join(import.meta.dirname, "../../build/icon_windows.png")
-    : app.isPackaged
-      ? join(process.resourcesPath, "icon.png")
-      : join(import.meta.dirname, "../../build/icon.png");
+// Fork: 图标走 forkIconPath，未打包运行时按 fork 身份切到 build/blackbird（否则是上游 Z.ai 图标）。
+const iconPath = resolveIconPath(process.platform === "win32" ? "icon_windows.png" : "icon.png");
 const linuxDesktopIntegrationIconPath =
   process.platform === "linux"
-    ? app.isPackaged
-      ? join(process.resourcesPath, "icon_512x512.png")
-      : join(import.meta.dirname, "../../build/icons/512x512.png")
+    ? resolveIconPath("icon_512x512.png", "icons/512x512.png")
     : iconPath;
 let currentApplicationLocale: Locale = DEFAULT_LOCALE;
 let closeToTrayOnWindows = true;
