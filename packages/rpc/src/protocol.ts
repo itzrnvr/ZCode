@@ -49,11 +49,18 @@ export type MessagePortPayload = Uint8Array | MessagePortFlowControl;
 
 function isMessagePortFlowControl(value: unknown): value is MessagePortFlowControl {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  // 二进制帧就是 Uint8Array（见 MessagePortPayload），而 `Array.isArray` 对 typed array
+  // 是 false —— 旧实现于是对**整帧**执行 Object.keys，把每个字节下标物化成一个字符串键。
+  // 实测代价：一次冷会话点击里本函数 self time 1325 ms（占采样 22.6%），最大帧 1.19 MB
+  // ≈ 119 万个键；帧越大越慢，正好打在「大会话打开慢」这条路径上。
+  // ArrayBuffer 同理不是 flow-control 对象。先排除二进制视图/缓冲区，再读判别属性，
+  // 最后才校验键数：三步都是 O(1)，且判定结果与旧实现完全一致（三个条件仍是合取）。
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return false;
   const record = value as Record<string, unknown>;
   return (
-    Object.keys(record).length === 2 &&
     record.__zcodeRpcControl === "connection-flow-v1" &&
-    (record.state === "saturated" || record.state === "drained")
+    (record.state === "saturated" || record.state === "drained") &&
+    Object.keys(record).length === 2
   );
 }
 
