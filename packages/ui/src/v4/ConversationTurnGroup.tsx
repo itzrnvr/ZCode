@@ -93,7 +93,7 @@ interface ConversationTurnGroupProps {
   /** 仅由 Timeline 注入给当前 live turn；历史 turn 永远不携带运行时 retry。 */
   apiRetry?: ApiRetryState | null;
   context: ConversationRowRenderContext;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   onFeedbackChange?: AssistantFeedbackHandler;
   onEdit?: (
@@ -628,7 +628,7 @@ function ConversationWorkSegmentFlow({
 }: {
   segment: ConversationTurnWorkSegment;
   context: ConversationRowRenderContext;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   onEdit?: ConversationTurnGroupProps["onEdit"];
   editWorkspaceRewindAvailability: EditWorkspaceRewindAvailability;
@@ -784,7 +784,7 @@ function ConversationTurnFlow({
   unit: ConversationTurnRenderUnit;
   apiRetry: ApiRetryState | null;
   context: ConversationRowRenderContext;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   onEdit?: ConversationTurnGroupProps["onEdit"];
   editWorkspaceRewindAvailability: EditWorkspaceRewindAvailability;
@@ -955,7 +955,7 @@ function ConversationBackgroundResultWork({
   unit: ConversationTurnRenderUnit;
   apiRetry: ApiRetryState | null;
   context: ConversationRowRenderContext;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   title: string;
   assistantCopyText?: string;

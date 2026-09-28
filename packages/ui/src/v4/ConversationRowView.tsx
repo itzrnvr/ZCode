@@ -14,6 +14,7 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
   TrendingUpDownIcon,
+  Loader2,
   XIcon,
 } from "lucide-react";
 import {
@@ -87,7 +88,7 @@ import { resolveWorkflowRunOpenToolCallId } from "@/v4/workflowRunCardJoin.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
-import { runUserAction, runUserActionAsync } from "@/lib/userActionTelemetry.js";
+import { runUserActionAsync } from "@/lib/userActionTelemetry.js";
 import { logger } from "@/logger.js";
 import type { AssistantPreviewCard } from "@/lib/assistantPreviewCards.js";
 import {
@@ -245,7 +246,7 @@ interface ConversationRowViewProps {
   /** 渲染上下文（theme/codePreviewSettings/workspacePath）；宿主保证引用稳定。 */
   context: ConversationRowRenderContext;
   /** 完成态 assistant 行的 fork 入口（forkAssistant command）。 */
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   /** assistant entity 反馈 CAS；UI 先乐观更新，命令失败时回滚。 */
   onFeedbackChange?: AssistantFeedbackHandler;
   /** 协议兼容：上层仍可提供 retryTurn capability，但产品 UI 不渲染普通重试入口。 */
@@ -1328,7 +1329,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   hookInvocations?: readonly HookInvocationRow[];
   sessionId?: string | null;
   turnId?: string;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   onFeedbackChange?: AssistantFeedbackHandler;
   className?: string;
@@ -1344,6 +1345,8 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
     id: localFeedback === "dislike" ? "chat.message.disliked" : "chat.message.dislike",
   });
   const forkLabel = intl.formatMessage({ id: "chat.message.fork" });
+  const forkingLabel = intl.formatMessage({ id: "chat.message.forking" });
+  const [isForking, setIsForking] = useState(false);
   const timeLabel = formatMessageTimeLabel(createdAt, locale, intl);
   const resolveTooltip = (label: string): string | undefined => label;
 
@@ -1394,15 +1397,17 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
     [entityId, localFeedback, onFeedbackChange, platform, rowId, sessionId],
   );
   const handleFork = useCallback(() => {
-    if (entityId) {
-      runUserAction({
+    if (entityId && !isForking) {
+      setIsForking(true);
+      const done = () => setIsForking(false);
+      void runUserActionAsync({
         input: { featureId: "conversation.history.branch", action: "fork", trigger: "button" },
-        operation: () => onFork?.({ rowId, entityId }),
+        operation: async () => onFork?.({ rowId, entityId }),
         completed: { resultSource: "optimistic_projection" },
         failureStage: "fork",
-      });
+      }).then(done, done);
     }
-  }, [entityId, onFork, rowId]);
+  }, [entityId, isForking, onFork, rowId]);
   return (
     <MessageActions className={cn(className)}>
       <CopyRowAction
@@ -1453,13 +1458,19 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
       ) : null}
       {onFork && entityId ? (
         <MessageAction
-          aria-label={forkLabel}
-          label={forkLabel}
-          tooltip={resolveTooltip(forkLabel)}
+          aria-label={isForking ? forkingLabel : forkLabel}
+          aria-busy={isForking}
+          disabled={isForking}
+          label={isForking ? forkingLabel : forkLabel}
+          tooltip={isForking ? forkingLabel : resolveTooltip(forkLabel)}
           data-testid={testId(TID_V4_FORK, String(rowId))}
           onClick={handleFork}
         >
-          <TrendingUpDownIcon className="size-3.5" />
+          {isForking ? (
+            <Loader2 className="size-3.5 animate-spin text-primary" />
+          ) : (
+            <TrendingUpDownIcon className="size-3.5" />
+          )}
         </MessageAction>
       ) : null}
       {turnId && hookInvocations ? (
@@ -1490,7 +1501,7 @@ const AssistantTextRowView = memo(function AssistantTextRowView({
 }: {
   row: AssistantTextRow;
   context: ConversationRowRenderContext;
-  onFork?: (target: ConversationRowTarget) => void;
+  onFork?: (target: ConversationRowTarget) => Promise<unknown> | void;
   onRetry?: (target: ConversationRowTarget) => void;
   onFeedbackChange?: AssistantFeedbackHandler;
   hideActions?: boolean;
