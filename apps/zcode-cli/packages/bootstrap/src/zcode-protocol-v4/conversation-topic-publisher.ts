@@ -269,7 +269,6 @@ export class ConversationTopicPublisher {
     byProfile: Map<DeliveryProfile, ConversationRow[]>;
   } | null = null;
   /** PERF 观测：行索引重建日志的节流水位，避免每事件刷屏。 */
-  private rowsIndexLoggedAt = 0;
 
   constructor(
     private readonly sessionId: string,
@@ -362,17 +361,7 @@ export class ConversationTopicPublisher {
     }
     const cached = this.rowsIndex.byProfile.get(profile);
     if (cached) return cached;
-    const startedAt = Date.now();
     const rows = filterConversationRowsForProfile(snapshot.rows.window, profile);
-    // PERF：重建只应发生在投影写入之后。节流到每秒一条，但慢重建始终记录——重建频率
-    // 或耗时与读调用次数同阶时，说明某条读路径没有复用这份索引。
-    const elapsedMs = Date.now() - startedAt;
-    if (elapsedMs >= 4 || Date.now() - this.rowsIndexLoggedAt >= 1000) {
-      this.rowsIndexLoggedAt = Date.now();
-      console.log(
-        `[PERF] conversation-publisher: rows index rebuild rows=${rows.length} in ${elapsedMs}ms`,
-      );
-    }
     this.rowsIndex.byProfile.set(profile, rows);
     return rows;
   }
