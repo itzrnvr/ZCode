@@ -86,6 +86,7 @@ import {
   type PrependVirtualAnchor,
   type TimelineUserScrollIntent,
 } from "@/v4/timelineScrollAnchor.js";
+import type { TimelineScrollMetrics } from "@/v4/timelineScrollAnchor.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
@@ -874,15 +875,23 @@ function ConversationTimelineImpl({
     }
   }, []);
 
-  const syncMessageLayerMask = useCallback((element: HTMLDivElement) => {
+  // #4：滚动热路径上每次 layout 读取都可能触发一次强制 style+layout（实测一次
+  // 40 帧快滚里 9194 次读取、24509 次强制重排）。metrics 由调用方一次性读好后传入，
+  // 缺省时才自己读，保持非热路径调用方的原有签名。
+  const syncMessageLayerMask = useCallback(
+    (element: HTMLDivElement, metrics?: TimelineScrollMetrics) => {
     const messageLayer = messageLayerRef.current;
     if (!messageLayer) return;
 
+    const scrollTop = metrics?.scrollTop ?? element.scrollTop;
+    const metricsViewportHeight = metrics?.viewportHeight ?? element.clientHeight;
+    const contentHeight = metrics?.contentHeight ?? element.scrollHeight;
+
     if (
       isAtBottom({
-        scrollTop: element.scrollTop,
-        viewportHeight: element.clientHeight,
-        contentHeight: element.scrollHeight,
+        scrollTop,
+        viewportHeight: metricsViewportHeight,
+        contentHeight,
       })
     ) {
       // 贴底时消息已经位于正常文档流末尾，不会经过 sticky composer；
@@ -892,13 +901,13 @@ function ConversationTimelineImpl({
       return;
     }
 
-    const viewportHeight = element.clientHeight;
+    const viewportHeight = metricsViewportHeight;
     const transparentStart = Math.max(
       0,
       viewportHeight - COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX,
     );
     const opaqueEnd = Math.max(0, transparentStart - COMPOSER_MESSAGE_MASK_FADE_PX);
-    const viewportTopInLayer = Math.max(0, element.scrollTop - messageLayer.offsetTop);
+    const viewportTopInLayer = Math.max(0, scrollTop - messageLayer.offsetTop);
     const maskImage = `linear-gradient(to bottom, black 0, black ${opaqueEnd}px, transparent ${transparentStart}px, transparent 100%)`;
 
     // dock 的透明 padding 能保留分屏 focus ring，但消息会从留白透出；
@@ -909,11 +918,24 @@ function ConversationTimelineImpl({
     messageLayer.style.webkitMaskPosition = `0 ${viewportTopInLayer}px`;
     messageLayer.style.maskSize = `100% ${viewportHeight}px`;
     messageLayer.style.webkitMaskSize = `100% ${viewportHeight}px`;
-  }, []);
+    },
+    [],
+  );
 
+  // #4：容器几何一趟只读一次。此前每个 scroll 事件重复读 scrollTop（1 + 行数 + 2 次）、
+  // clientHeight（2 次）、scrollHeight（1 次），而 React/虚拟列表在事件之间持续写 DOM，
+  // 每次读取都可能触发一次强制 style+layout（实测 40 帧快滚：9194 次几何读取、
+  // 24509 次 Blink.ForcedStyleAndLayout）。行锚点位置仍只能逐个读 rect，但容器属性不再重复读。
   const syncTurnNavigatorViewport = useCallback(
     (element: HTMLDivElement) => {
-      syncMessageLayerMask(element);
+      const scrollTop = element.scrollTop;
+      const viewportHeight = element.clientHeight;
+      const metrics: TimelineScrollMetrics = {
+        scrollTop,
+        viewportHeight,
+        contentHeight: element.scrollHeight,
+      };
+      syncMessageLayerMask(element, metrics);
       const viewportRect = element.getBoundingClientRect();
       const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
       for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
@@ -922,18 +944,18 @@ function ConversationTimelineImpl({
           continue;
         }
         const rowRect = rowElement.getBoundingClientRect();
-        const start = element.scrollTop + rowRect.top - viewportRect.top;
+        const start = scrollTop + rowRect.top - viewportRect.top;
         queryPositions.push({ rowId, start, end: start + rowRect.height });
       }
       const nextViewport = {
-        scrollOffsetPx: element.scrollTop,
-        viewportHeightPx: element.clientHeight,
+        scrollOffsetPx: scrollTop,
+        viewportHeightPx: viewportHeight,
         // turn 级 active 只能命中同 turn 的第一条 query。这里从已挂载
         // 的稳定 row anchor 推导当前 query；虚拟 turn 尚未挂载时组件再回退 unit。
         activeQueryRowId: resolveConversationTurnNavigatorActiveQueryRowId({
           positions: queryPositions,
-          scrollOffsetPx: element.scrollTop,
-          viewportHeightPx: element.clientHeight,
+          scrollOffsetPx: scrollTop,
+          viewportHeightPx: viewportHeight,
         }),
       };
       setTurnNavigatorViewport((current) =>
@@ -945,6 +967,28 @@ function ConversationTimelineImpl({
       );
     },
     [syncMessageLayerMask],
+  );
+
+  // scroll 事件一帧内可多次派发（原生滚动 + 程序化落点 + 合成事件），每趟同步都要走
+  // querySelectorAll + 逐行 rect。热路径改为每帧至多一趟；程序化滚动（贴底/跳转/记忆恢复）
+  // 仍直接调同步版本，避免目录高亮落后一帧。
+  const turnNavigatorSyncFrameRef = useRef<number | null>(null);
+  const scheduleTurnNavigatorViewportSync = useCallback(() => {
+    if (turnNavigatorSyncFrameRef.current !== null) return;
+    turnNavigatorSyncFrameRef.current = requestAnimationFrame(() => {
+      turnNavigatorSyncFrameRef.current = null;
+      const element = scrollRef.current;
+      if (element) syncTurnNavigatorViewport(element);
+    });
+  }, [syncTurnNavigatorViewport]);
+  useEffect(
+    () => () => {
+      if (turnNavigatorSyncFrameRef.current !== null) {
+        cancelAnimationFrame(turnNavigatorSyncFrameRef.current);
+        turnNavigatorSyncFrameRef.current = null;
+      }
+    },
+    [],
   );
 
   useLayoutEffect(() => {
@@ -965,9 +1009,14 @@ function ConversationTimelineImpl({
     return () => window.removeEventListener("resize", sync);
   }, [syncMessageLayerMask, renderUnits.length === 0]);
 
+  // #4：热路径（scroll 事件）把已经读好的 metrics 传进来，避免同一事件里第二次
+  // 读容器几何；其余调用方（卸载保存、scope 切换前捕获）仍按原签名自读。
   const buildCurrentScrollMemoryState = useCallback(
-    (element: HTMLDivElement): ChatSessionScrollMemoryState => {
-      const metrics = {
+    (
+      element: HTMLDivElement,
+      preReadMetrics?: TimelineScrollMetrics,
+    ): ChatSessionScrollMemoryState => {
+      const metrics: TimelineScrollMetrics = preReadMetrics ?? {
         scrollTop: element.scrollTop,
         viewportHeight: element.clientHeight,
         contentHeight: element.scrollHeight,
@@ -978,9 +1027,9 @@ function ConversationTimelineImpl({
         lastObservedScrollTop: lastObservedScrollTopRef.current,
       });
       return {
-        scrollTop: element.scrollTop,
-        scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
+        scrollTop: metrics.scrollTop,
+        scrollHeight: metrics.contentHeight,
+        clientHeight: metrics.viewportHeight,
         wasPinnedToBottom,
         updatedAt: Date.now(),
       };
@@ -989,8 +1038,11 @@ function ConversationTimelineImpl({
   );
 
   const cacheCurrentScrollMemoryState = useCallback(
-    (element: HTMLDivElement): ChatSessionScrollMemoryState => {
-      const state = buildCurrentScrollMemoryState(element);
+    (
+      element: HTMLDivElement,
+      preReadMetrics?: TimelineScrollMetrics,
+    ): ChatSessionScrollMemoryState => {
+      const state = buildCurrentScrollMemoryState(element, preReadMetrics);
       if (scrollMemoryKey) {
         latestScrollMemoryStateRef.current = { key: scrollMemoryKey, state };
       }
@@ -1142,7 +1194,8 @@ function ConversationTimelineImpl({
     scrollToBottom,
   ]);
 
-  const saveCurrentScrollMemory = useCallback(() => {
+  const saveCurrentScrollMemory = useCallback(
+    (preReadMetrics?: TimelineScrollMetrics) => {
     const key = scrollMemoryKey;
     const element = scrollRef.current;
     if (!key) return;
@@ -1153,10 +1206,12 @@ function ConversationTimelineImpl({
       pendingRestore?.key === key
         ? pendingRestore.state
         : element
-          ? cacheCurrentScrollMemoryState(element)
+          ? cacheCurrentScrollMemoryState(element, preReadMetrics)
           : cachedState;
     if (state) saveChatSessionScrollMemoryState(key, state);
-  }, [cacheCurrentScrollMemoryState, scrollMemoryKey]);
+    },
+    [cacheCurrentScrollMemoryState, scrollMemoryKey],
+  );
 
   const restoreScrollMemory = useCallback(
     (state: ChatSessionScrollMemoryState) => {
@@ -1183,9 +1238,16 @@ function ConversationTimelineImpl({
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
+    // #4：一个 scroll 事件只读一趟容器几何，下面所有判定复用同一份 metrics。
+    // 事件之间虚拟列表在写 DOM，重复读取每次都可能变成一次强制 style+layout。
+    const metrics: TimelineScrollMetrics = {
+      scrollTop: element.scrollTop,
+      viewportHeight: element.clientHeight,
+      contentHeight: element.scrollHeight,
+    };
     const programmaticScroll =
       programmaticScrollFrameRef.current !== null &&
-      Math.abs(element.scrollTop - lastObservedScrollTopRef.current) < 1;
+      Math.abs(metrics.scrollTop - lastObservedScrollTopRef.current) < 1;
     const userScrollIntent = getActiveUserScrollIntent();
     // 用户输入优先；其余 scroll 若落在内容/测高 guard 内视为布局补偿，guard 外的
     // 未分类事件继续按真实用户滚动处理，兼容原生滚动条和辅助技术。
@@ -1202,30 +1264,27 @@ function ConversationTimelineImpl({
     if (scrollSource !== "layout") {
       suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
     }
-    lastObservedScrollTopRef.current = element.scrollTop;
-    syncTurnNavigatorViewport(element);
+    lastObservedScrollTopRef.current = metrics.scrollTop;
+    // 热路径按帧合并：一帧内多次 scroll 事件只跑一趟目录/遮罩同步。
+    scheduleTurnNavigatorViewportSync();
     const following = resolveFollowingAfterScroll({
       following: followingRef.current,
       source: scrollSource,
-      metrics: {
-        scrollTop: element.scrollTop,
-        viewportHeight: element.clientHeight,
-        contentHeight: element.scrollHeight,
-      },
+      metrics,
     });
     commitFollowing(following);
     if (scrollSource === "user") {
       pendingDetachedScrollRestoreRef.current = null;
       userAdjustedScrollSinceRestoreRef.current = true;
-      saveCurrentScrollMemory();
+      saveCurrentScrollMemory(metrics);
     }
     // 只在 64px 顶边才补页时，用户会先撞到窗口边界再看到内容跳入；提前两个
     // 视口预取，让桌面和手机 Web 共用的 renderer 在用户抵达边界前完成补页。
     const loadOlder = loadOlderRef.current;
-    const triggerPx = historyPrefetchTriggerPx(element.clientHeight);
+    const triggerPx = historyPrefetchTriggerPx(metrics.viewportHeight);
     if (
       shouldTriggerLoadOlder({
-        scrollTop: element.scrollTop,
+        scrollTop: metrics.scrollTop,
         canLoadOlder: loadOlder.canLoadOlder,
         loadingOlder: loadOlder.loadingOlder,
         triggerPx,
@@ -1233,7 +1292,7 @@ function ConversationTimelineImpl({
     ) {
       // 前插超过 viewport + overscan 后旧可见 turn 会被卸载，DOM 不能作为跨
       // commit 锚点；这里保存 virtualizer 按稳定 turn key 维护的 measurement 起点。
-      const anchorMeasurement = virtualizer.getVirtualItemForOffset(element.scrollTop);
+      const anchorMeasurement = virtualizer.getVirtualItemForOffset(metrics.scrollTop);
       const anchorUnit = anchorMeasurement
         ? virtualizedUnitsRef.current[anchorMeasurement.index]
         : undefined;
@@ -1241,12 +1300,12 @@ function ConversationTimelineImpl({
         anchorMeasurement && anchorUnit?.key === anchorMeasurement.key
           ? {
               key: anchorUnit.key,
-              offsetTop: anchorMeasurement.start - element.scrollTop,
+              offsetTop: anchorMeasurement.start - metrics.scrollTop,
               start: anchorMeasurement.start,
             }
           : null;
       logger.debug("[v4-timeline] 接近历史窗口顶部，自动预取更早行", {
-        scrollTop: element.scrollTop,
+        scrollTop: metrics.scrollTop,
         triggerPx,
       });
       loadOlder.onLoadOlder?.();
@@ -1255,7 +1314,7 @@ function ConversationTimelineImpl({
     commitFollowing,
     getActiveUserScrollIntent,
     saveCurrentScrollMemory,
-    syncTurnNavigatorViewport,
+    scheduleTurnNavigatorViewportSync,
     virtualizer,
   ]);
 
