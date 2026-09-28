@@ -27,6 +27,8 @@ export function TaskActionMenuContent({
   Item,
   Separator,
   onTogglePinTask,
+  onMovePinnedItemUp,
+  onMovePinnedItemDown,
   onStartRenameTask,
   onArchiveTask,
   onMarkTaskAsUnread,
@@ -60,6 +62,8 @@ export function TaskActionMenuContent({
   Item: React.ComponentType<TaskActionMenuItemProps>;
   Separator: React.ComponentType<TaskActionMenuSeparatorProps>;
   onTogglePinTask: () => void;
+  onMovePinnedItemUp?: () => void;
+  onMovePinnedItemDown?: () => void;
   onStartRenameTask: () => void;
   onArchiveTask: () => void;
   onMarkTaskAsUnread: () => void;
@@ -90,6 +94,36 @@ export function TaskActionMenuContent({
       >
         {intl.formatMessage({ id: isPinned ? "taskList.unpin" : "taskList.pin" })}
       </Item>
+      {onMovePinnedItemUp || onMovePinnedItemDown ? (
+        <>
+          {onMovePinnedItemUp ? (
+            <Item
+              disabled={taskTargetActionsDisabled}
+              title={disabledReason}
+              onSelect={() => {
+                if (!taskTargetActionsDisabled) {
+                  onMovePinnedItemUp();
+                }
+              }}
+            >
+              {intl.formatMessage({ id: "taskList.moveUp" })}
+            </Item>
+          ) : null}
+          {onMovePinnedItemDown ? (
+            <Item
+              disabled={taskTargetActionsDisabled}
+              title={disabledReason}
+              onSelect={() => {
+                if (!taskTargetActionsDisabled) {
+                  onMovePinnedItemDown();
+                }
+              }}
+            >
+              {intl.formatMessage({ id: "taskList.moveDown" })}
+            </Item>
+          ) : null}
+        </>
+      ) : null}
       <Item
         disabled={taskTargetActionsDisabled}
         title={disabledReason}
