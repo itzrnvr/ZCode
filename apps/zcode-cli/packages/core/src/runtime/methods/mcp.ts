@@ -12,6 +12,7 @@ import type {
   TraceContext,
 } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
+import { settleWithin } from "../withDeadline.js";
 
 const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
 
@@ -130,38 +131,6 @@ export function startMcpStartup(
     status: "started",
   });
   return this.mcpStartupPromise;
-}
-
-/**
- * 等到 promise settle，超时则回退到 fallback。
- * 补充注册与提醒注入都走这条路径：这些信息是“锦上添花”，
- * 任何上游卡住都不允许再把首个 provider 请求拖住。
- */
-export function settleWithin<T>(
-  promise: Promise<T>,
-  fallback: T,
-  timeoutMs: number = MCP_TOOL_REGISTRATION_WAIT_MS,
-  onTimeout?: () => void,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    // 计时器必须保持 ref（默认状态）：unref 的计时器在事件循环空闲时不会触发，
-    // 单发 CLI 场景下这个“截止时间”会静默失效，首个轮次又会被上游拖住。
-    // 提前 settle 时清掉它，避免多留一个待触发的计时器。
-    const timer = setTimeout(() => {
-      onTimeout?.();
-      resolve(fallback);
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
 }
 
 export async function initializeMcp(

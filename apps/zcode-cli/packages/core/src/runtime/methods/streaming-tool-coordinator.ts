@@ -34,6 +34,7 @@ import {
 } from "./turn-loop-state.js";
 import { createRuntimeAssistantEntry } from "../../agent/message-history.js";
 import { commitTurnRequestEntries } from "./turn-output-token-continuation.js";
+import { settleWithin } from "../withDeadline.js";
 
 const STREAMING_TOOL_CANCEL_DRAIN_TIMEOUT_MS = 250;
 const STREAMING_TOOL_EXECUTION_MODE = "readOnly";
@@ -118,8 +119,9 @@ export function createStreamingToolCoordinator(
           }),
         ),
       );
-      await raceWithTimeout(
+      await settleWithin(
         Promise.allSettled(handles.values()),
+        undefined,
         STREAMING_TOOL_CANCEL_DRAIN_TIMEOUT_MS,
       );
       state.turnAbortSignal.removeEventListener("abort", abortOnTurnCancel);
@@ -361,20 +363,6 @@ function shouldExecuteToolDuringStream(
   );
 }
 
-async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<undefined>((resolve) => {
-        timeout = setTimeout(() => resolve(undefined), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
 async function collectCompletedResults(
   handles: Map<string, Promise<StreamedToolExecutionResult | undefined>>,
   toolCalls: readonly ModelToolCall[],
@@ -383,8 +371,9 @@ async function collectCompletedResults(
     toolCalls.map((toolCall) => {
       const handle = handles.get(toolCall.id);
       if (!handle) return undefined;
-      return raceWithTimeout(
+      return settleWithin(
         handle.catch(() => undefined),
+        undefined,
         STREAMING_TOOL_CANCEL_DRAIN_TIMEOUT_MS,
       );
     }),
