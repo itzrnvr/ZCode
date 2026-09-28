@@ -87,6 +87,11 @@ import {
   type TimelineUserScrollIntent,
 } from "@/v4/timelineScrollAnchor.js";
 import type { TimelineScrollMetrics } from "@/v4/timelineScrollAnchor.js";
+import {
+  INITIAL_TIMELINE_FAST_SCROLL_STATE,
+  advanceTimelineFastScrollState,
+  type TimelineFastScrollState,
+} from "@/v4/timelineFastScroll.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
@@ -101,6 +106,8 @@ const COMPOSER_MESSAGE_MASK_FADE_PX = 24;
 const COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96;
 const USER_SCROLL_INTENT_TTL_MS = 1200;
 const LAYOUT_SCROLL_GUARD_MS = 250;
+/** 猛甩期间事件流中断后，多久兜底恢复行内容绘制。 */
+const FAST_SCROLL_PAINT_SKIP_IDLE_MS = 120;
 const CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
 const SCROLL_MEMORY_RESTORE_TOLERANCE_PX = 1;
 
@@ -487,6 +494,11 @@ function ConversationTimelineImpl({
   // 程序化写入（贴底/prepend 平移）后的回读值。贴底 effect 拿它对账未观察滚动
   // （滚动已发生、scroll 事件未派发），防止过期 following=true 把用户/测试的上滚拽回底部。
   const lastObservedScrollTopRef = useRef(0);
+  // #4：猛甩档位下跳过行内容**绘制**（visibility），布局与测高保持真实。判定是纯函数
+  // （timelineFastScroll.ts），这里只保存状态、上一帧落点与「滚动停止」兜底计时器。
+  const fastScrollStateRef = useRef<TimelineFastScrollState>(INITIAL_TIMELINE_FAST_SCROLL_STATE);
+  const fastScrollLastTopRef = useRef<number | null>(null);
+  const fastScrollIdleTimerRef = useRef<number | null>(null);
   // prepend 锚定基线（上一 commit 的首行/总高度），见下方对账效应。
   const prependAnchorRef = useRef<{
     firstRowId: number | null;
@@ -1235,6 +1247,55 @@ function ConversationTimelineImpl({
     ],
   );
 
+  // 直接写 DOM 属性而不是 state：滚动热路径上不能为「是否猛甩」再触发一次 React 渲染
+  // （与 syncMessageLayerMask 直接写 mask 样式同一理由）。
+  const applyFastScrollPaintSkip = useCallback((skipping: boolean) => {
+    const container = virtualHistoryRef.current;
+    if (!container) return;
+    if (skipping) {
+      container.setAttribute("data-v4-fast-scrolling", "true");
+    } else {
+      container.removeAttribute("data-v4-fast-scrolling");
+    }
+  }, []);
+
+  const releaseFastScrollPaintSkip = useCallback(() => {
+    if (fastScrollIdleTimerRef.current !== null) {
+      window.clearTimeout(fastScrollIdleTimerRef.current);
+      fastScrollIdleTimerRef.current = null;
+    }
+    fastScrollStateRef.current = INITIAL_TIMELINE_FAST_SCROLL_STATE;
+    fastScrollLastTopRef.current = null;
+    applyFastScrollPaintSkip(false);
+  }, [applyFastScrollPaintSkip]);
+
+  const updateFastScrollPaintSkip = useCallback(
+    (metrics: TimelineScrollMetrics) => {
+      const previousTop = fastScrollLastTopRef.current;
+      fastScrollLastTopRef.current = metrics.scrollTop;
+      const deltaPx = previousTop === null ? 0 : metrics.scrollTop - previousTop;
+      const wasSkipping = fastScrollStateRef.current.skipping;
+      const next = advanceTimelineFastScrollState(fastScrollStateRef.current, {
+        deltaPx,
+        viewportHeight: metrics.viewportHeight,
+      });
+      fastScrollStateRef.current = next;
+      if (next.skipping !== wasSkipping) applyFastScrollPaintSkip(next.skipping);
+      // 事件流可能在猛甩中途停止（滚轮惯性结束、指针抬起）：兜底计时器保证内容
+      // 不会停留在隐藏状态。
+      if (fastScrollIdleTimerRef.current !== null) {
+        window.clearTimeout(fastScrollIdleTimerRef.current);
+      }
+      if (next.skipping) {
+        fastScrollIdleTimerRef.current = window.setTimeout(() => {
+          fastScrollIdleTimerRef.current = null;
+          releaseFastScrollPaintSkip();
+        }, FAST_SCROLL_PAINT_SKIP_IDLE_MS);
+      }
+    },
+    [applyFastScrollPaintSkip, releaseFastScrollPaintSkip],
+  );
+
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
@@ -1245,6 +1306,7 @@ function ConversationTimelineImpl({
       viewportHeight: element.clientHeight,
       contentHeight: element.scrollHeight,
     };
+    updateFastScrollPaintSkip(metrics);
     const programmaticScroll =
       programmaticScrollFrameRef.current !== null &&
       Math.abs(metrics.scrollTop - lastObservedScrollTopRef.current) < 1;
@@ -1315,6 +1377,7 @@ function ConversationTimelineImpl({
     getActiveUserScrollIntent,
     saveCurrentScrollMemory,
     scheduleTurnNavigatorViewportSync,
+    updateFastScrollPaintSkip,
     virtualizer,
   ]);
 
@@ -1487,6 +1550,16 @@ function ConversationTimelineImpl({
     };
   }, []);
 
+  useEffect(
+    () => () => {
+      if (fastScrollIdleTimerRef.current !== null) {
+        window.clearTimeout(fastScrollIdleTimerRef.current);
+        fastScrollIdleTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
   const rowCount = renderUnits.length;
   const rowWindowKey = `${rows.length}:${rows[0]?.rowId ?? "none"}:${rows[rows.length - 1]?.rowId ?? "none"}`;
   const pendingGuideKey = pendingGuides.map((item) => item.queueItemId).join(":");
@@ -1496,6 +1569,8 @@ function ConversationTimelineImpl({
   // 恢复；首个 layout 立即写入防闪动，下一帧再校正异步测高，但必须把滚动权让给用户。
   useLayoutEffect(() => {
     clearUserScrollIntent();
+    // 会话切换不能把上一段猛甩的「跳过绘制」状态带进新会话。
+    releaseFastScrollPaintSkip();
     heightCacheRef.current?.clear();
     // prepend 锚定基线一并重置：rowId 跨会话可重复，禁止拿旧会话首行比较。
     prependAnchorRef.current = { firstRowId: null, totalSize: 0 };
@@ -1551,6 +1626,7 @@ function ConversationTimelineImpl({
     };
   }, [
     clearUserScrollIntent,
+    releaseFastScrollPaintSkip,
     restoreScrollMemory,
     scrollMemoryKey,
     scrollToBottom,

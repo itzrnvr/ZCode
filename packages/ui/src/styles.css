@@ -2072,3 +2072,18 @@ body {
 .prompt-mention[data-mention-category="plugins"]::before {
   border-radius: var(--radius-sm);
 }
+
+/*
+ * #4：猛甩档位跳过行内容**绘制**（只跳绘制，不跳布局）。
+ *
+ * 实测（真实 renderer，CDP，同一会话交替测量）：已挂载行内容的绘制约占每帧成本 25% —
+ * 0.35 viewport/帧 p50 15.9→11.8 ms、>32ms 帧 14→5.5；1.5 viewport/帧 p50 40.3→31.0 ms、
+ * >32ms 帧 112→75。属性由 ConversationTimeline 按 timelineFastScroll.ts 的纯函数判定挂载
+ * （连续两帧位移 ≥0.8 视口才进入，连续两帧低于阈值或滚动停止 120ms 即退出）。
+ *
+ * 刻意不用 content-visibility：连布局一起跳过会让行高退化成估值，虚拟列表反复重测重排，
+ * 实测 p50 反而从 41 ms 恶化到 77.8 ms。
+ */
+[data-v4-timeline-virtual-history][data-v4-fast-scrolling="true"] [data-v4-turn-unit] > * {
+  visibility: hidden;
+}
