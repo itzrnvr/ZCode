@@ -1738,6 +1738,8 @@ const zhCN: Record<string, string> = {
   "taskList.recentSection": "最近任务",
   "taskList.delete": "删除任务",
   "taskList.pin": "置顶任务",
+  "taskList.moveUp": "上移",
+  "taskList.moveDown": "下移",
   "taskList.unpin": "取消置顶任务",
   "taskList.rename": "重命名任务",
   "taskList.archive": "归档任务",

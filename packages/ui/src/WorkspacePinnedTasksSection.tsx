@@ -35,6 +35,8 @@ interface PinnedTaskItemHandlers {
   onStartRenameTask: (taskId: string, currentTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onMarkTaskAsUnread: (taskId: string) => void;
+  onMovePinnedItemUp: () => void;
+  onMovePinnedItemDown: () => void;
   onOpenTaskContextMenu: (taskId: string) => void;
   onOpenFileTree: (task: ZCodeTaskMeta) => void;
 }
@@ -134,11 +136,29 @@ export function WorkspacePinnedTasksSection({
       (workspaceKey) => remotePinnedItemsByWorkspaceKey[workspaceKey] ?? [],
     );
   }, [remotePinnedItemsByWorkspaceKey, workspaceTabs]);
+  const [manualOrder, setManualOrder] = useState<readonly string[] | null>(null);
   const sortedItems = useMemo(() => {
-    return [...localItems, ...remoteItems].sort((left, right) =>
+    const base = [...localItems, ...remoteItems].sort((left, right) =>
       compareZCodeTaskListItems(left, right, taskSortBy),
     );
-  }, [localItems, remoteItems, taskSortBy]);
+    // 用户手动重排后，未显式移动的行保持相对顺序：已知键按 manualOrder 排，
+    // 新到达的行追加到末尾，避免重查/刷新把手动顺序冲回时间序。
+    if (!manualOrder) return base;
+    const rank = new Map(manualOrder.map((key, index) => [key, index]));
+    const known: typeof base = [];
+    const fresh: typeof base = [];
+    for (const item of base) {
+      const key = buildPinnedItemKey(item.workspacePath, item.taskId, item.workspaceIdentity);
+      if (rank.has(key)) known.push(item);
+      else fresh.push(item);
+    }
+    known.sort((left, right) => {
+      const leftKey = buildPinnedItemKey(left.workspacePath, left.taskId, left.workspaceIdentity);
+      const rightKey = buildPinnedItemKey(right.workspacePath, right.taskId, right.workspaceIdentity);
+      return (rank.get(leftKey) ?? 0) - (rank.get(rightKey) ?? 0);
+    });
+    return [...known, ...fresh];
+  }, [localItems, remoteItems, taskSortBy, manualOrder]);
   const items = showAllTasks ? sortedItems : sortedItems.slice(0, collapsedLimit);
   const total = sortedItems.length;
   const syncingRemoteWorkspaces = workspaceTabs.some((tab) => {
@@ -374,11 +394,40 @@ export function WorkspacePinnedTasksSection({
   const openPinnedItemContextMenu = useCallback((itemKey: string) => {
     // pinned row handler 按 itemKey 缓存；打开菜单时从 ref 读取最新确认态，
     // 避免 pendingArchiveItemKey 变化时重建所有 TaskListItem callback。
+    // 注意：不能在这里 preventDefault/stopPropagation —— section 级 Radix
+    // ContextMenuTrigger 靠冒泡的 contextmenu 事件打开菜单，吞掉后菜单永远打不开。
     if (pendingArchiveItemKeyRef.current === itemKey) {
       setPendingArchiveItemKey(null);
     }
     setContextMenuItemKey(itemKey);
   }, []);
+  const movePinnedItem = useCallback(
+    (itemKey: string, direction: -1 | 1) => {
+      const current = itemByKeyRef.current.get(itemKey);
+      if (!current) return;
+      const orderedKeys = items.map((item) =>
+        buildPinnedItemKey(item.workspacePath, item.taskId, item.workspaceIdentity),
+      );
+      const fromIndex = orderedKeys.indexOf(itemKey);
+      if (fromIndex < 0) return;
+      const toIndex = Math.max(0, Math.min(orderedKeys.length - 1, fromIndex + direction));
+      if (toIndex === fromIndex) return;
+      const next = [...orderedKeys];
+      const [moved] = next.splice(fromIndex, 1);
+      if (!moved) return;
+      next.splice(toIndex, 0, moved);
+      setManualOrder(next);
+    },
+    [items],
+  );
+  const movePinnedItemUp = useCallback(
+    (itemKey: string) => movePinnedItem(itemKey, -1),
+    [movePinnedItem],
+  );
+  const movePinnedItemDown = useCallback(
+    (itemKey: string) => movePinnedItem(itemKey, 1),
+    [movePinnedItem],
+  );
   const getPinnedTaskItemHandlers = useCallback(
     (itemKey: string) => {
       let handlers = taskItemHandlersByKeyRef.current.get(itemKey);
@@ -404,6 +453,12 @@ export function WorkspacePinnedTasksSection({
           onMarkTaskAsUnread: () => {
             markPinnedItemAsUnread(itemKey);
           },
+          onMovePinnedItemUp: () => {
+            movePinnedItemUp(itemKey);
+          },
+          onMovePinnedItemDown: () => {
+            movePinnedItemDown(itemKey);
+          },
           onOpenTaskContextMenu: () => {
             openPinnedItemContextMenu(itemKey);
           },
@@ -422,6 +477,8 @@ export function WorkspacePinnedTasksSection({
       archivePinnedItem,
       archivePinnedItemInline,
       markPinnedItemAsUnread,
+      movePinnedItemDown,
+      movePinnedItemUp,
       openPinnedItemContextMenu,
       selectPinnedItem,
       startPinnedItemRename,
@@ -568,6 +625,8 @@ export function WorkspacePinnedTasksSection({
                   onStartRenameTask={handlers.onStartRenameTask}
                   onArchiveTask={handlers.onArchiveTask}
                   onMarkTaskAsUnread={handlers.onMarkTaskAsUnread}
+                  onMovePinnedItemUp={handlers.onMovePinnedItemUp}
+                  onMovePinnedItemDown={handlers.onMovePinnedItemDown}
                   onOpenTaskContextMenu={handlers.onOpenTaskContextMenu}
                   onOpenFileTree={onOpenFileTree ? handlers.onOpenFileTree : undefined}
                   intl={intl}
@@ -737,6 +796,16 @@ export function WorkspacePinnedTasksSection({
                     nextState: { pinned: true, archived: false },
                   });
                 });
+            }}
+            onMovePinnedItemUp={() => {
+              if (contextMenuItemKey) {
+                movePinnedItemUp(contextMenuItemKey);
+              }
+            }}
+            onMovePinnedItemDown={() => {
+              if (contextMenuItemKey) {
+                movePinnedItemDown(contextMenuItemKey);
+              }
             }}
           />
         ) : null}

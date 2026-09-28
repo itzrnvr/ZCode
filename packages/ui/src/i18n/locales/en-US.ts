@@ -1860,6 +1860,8 @@ const enUS: Record<string, string> = {
   "taskList.recentSection": "Recent",
   "taskList.delete": "Delete task",
   "taskList.pin": "Pin task",
+  "taskList.moveUp": "Move up",
+  "taskList.moveDown": "Move down",
   "taskList.unpin": "Unpin task",
   "taskList.rename": "Rename task",
   "taskList.archive": "Archive task",
