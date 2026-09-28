@@ -118,6 +118,7 @@ export interface ExploreSubagentPortOptions {
   enqueueParentTaskNotification?: EnqueueParentTaskNotification;
   outputRootDir?: string;
   profiles?: readonly AgentProfile[];
+  getAgentProfiles?: () => readonly AgentProfile[] | undefined;
   builtInModelSelectionOverrides?: Partial<Record<"general-purpose" | "Explore", ModelSelection>>;
   getBuiltInModelSelectionOverrides?: () =>
     | Partial<Record<"general-purpose" | "Explore", ModelSelection>>
@@ -140,12 +141,14 @@ export function createExploreSubagentPort(
   const registry = options.runtimeTaskRegistry ?? new InMemoryRuntimeTaskRegistry();
   const abortControllers = new Map<string, AbortController>();
   const borrowedForegroundAgentIds = new Set<string>();
-  // 覆盖项会被运行时活更新；每次解析都读当前值，避免内置子智能体的模型选择停在端口创建时的快照。
+  // 覆盖项与 profile 列表都被运行时活更新；每次解析都读当前值，避免子智能体
+  // 可见集合停在端口创建时的快照（新创建的子智能体对已激活会话报 UNKNOWN_AGENT_TYPE）。
   let builtInModelSelectionOverrides = options.builtInModelSelectionOverrides;
   const resolveActiveProfiles = (): AgentProfile[] => {
     const liveOverrides =
       options.getBuiltInModelSelectionOverrides?.() ?? builtInModelSelectionOverrides;
-    return normalizeAgentProfiles(options.profiles ?? [], {
+    const liveProfiles = options.getAgentProfiles?.();
+    return normalizeAgentProfiles(liveProfiles ?? options.profiles ?? [], {
       builtInModelSelectionOverrides: liveOverrides,
     });
   };

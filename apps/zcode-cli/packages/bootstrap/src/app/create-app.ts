@@ -511,7 +511,47 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       resumePrepared = true;
     };
 
+    // #23：settings 创建/更新/删除子智能体后，已激活会话在下一轮入口刷新可见集。
+    // 只读用户+项目两处 markdown 根（插件 agent 随插件启停走重启，不在此刷新）。
+    // 装配（判脏→换数据→重建 Agent/Task 描述→失效缓存→暂存新增名）全在 core 公共方法里；
+    // 这里只供“新鲜出炉”的 loader 结果。loader 失败/无变化/装配失败都无抛，
+    // 本轮照常执行——刷新永远不阻塞用户输入。
+    const refreshSubagentProfilesForTurn = async (): Promise<void> => {
+      try {
+        const outcome = await loadZCodeAgentProfiles({
+          logger,
+          storageRoot,
+          workingDirectory,
+        });
+        for (const failure of outcome.diagnostics) {
+          if (failure.code === "agent_read_failed") {
+            logger.warn("Subagent profile refresh diagnostic", {
+              code: failure.code,
+              message: failure.message,
+              module: "bootstrap.subagents",
+              path: failure.path,
+            });
+          }
+        }
+        const added = getRuntime().refreshSubagentProfiles(outcome.profiles);
+        if (added.length > 0) {
+          logger.info("Subagent profiles refreshed for active session", {
+            added,
+            event: "subagent.profiles.refreshed",
+            module: "bootstrap.subagents",
+            status: "completed",
+          });
+        }
+      } catch {
+        // 保持旧快照，调用方照常走下一轮。
+      }
+    };
+
     const prepareUserExecutionBoundary: PrepareUserExecutionBoundary = async (boundaryOptions) => {
+      // #23 的刷新只在“真实用户执行”边界跑：下一轮开始前把新 agent 装进
+      // runtime.config + Agent/Task 描述；新增名由 core 侧 turn-loop 按相关性提示。
+      // 失败/无变化时保持旧快照，本轮照常执行——刷新永远不阻塞用户输入。
+      await refreshSubagentProfilesForTurn();
       // Bash shell 快照属于“首次真实用户执行”边界，而不是 chat
       // input 独有状态。普通 prompt、expert workflow、script workflow 都可能
       // 作为新 session 的第一个模型/子 agent 入口，必须统一在 resume/context

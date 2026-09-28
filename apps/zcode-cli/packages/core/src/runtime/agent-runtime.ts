@@ -59,6 +59,7 @@ import type {
   ToolSchedule,
   ToolExecutor,
   ToolRegistry,
+  AgentProfile,
   ContextBuilder,
   ContextBuildResult,
   ContextSourceSnapshot,
@@ -188,6 +189,7 @@ export class AgentRuntime {
   private sessionStore?: SessionStorePort;
   private sessionPersisted = false;
   private needsPlanModeExitReminder = false;
+  private pendingNewAgentProfileNames: string[] | undefined = undefined;
   private latestConversationMessageId?: MessageId;
   private latestAssistantMessageId?: MessageId;
   private latestAssistantTurnId?: TurnId;
@@ -341,6 +343,11 @@ export interface AgentRuntime {
   updateConfig(
     patch: Pick<AgentRuntimeConfig, "mode" | "planEnabled" | "language" | "outputStyle">,
   ): void;
+  /**
+   * #23：settings 创建/更新/删除子智能体后，已激活会话在下一轮入口调用。
+   * 名字集合变化时换数据+重建 Agent/Task 描述+失效工具缓存；返回新增名。
+   */
+  refreshSubagentProfiles(profiles: readonly AgentProfile[]): string[];
   initializeSessionShellEnvironmentIfNeeded(
     selection: ExecutionShellSelection | (() => ExecutionShellSelection),
   ): boolean;

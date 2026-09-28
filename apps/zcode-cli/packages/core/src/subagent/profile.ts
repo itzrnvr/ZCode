@@ -144,6 +144,35 @@ export function createBuiltInGeneralPurposeAgentProfile(
   };
 }
 
+
+/** #23：比较两份 profile 列表的“模型可见名集”，只在新增名时返回它们。 */
+export function diffNewAgentProfileNames(
+  previous: readonly AgentProfile[],
+  current: readonly AgentProfile[],
+): string[] {
+  const before = new Set(previous.map((profile) => profile.name));
+  const added: string[] = [];
+  const seen = new Set<string>();
+  for (const profile of current) {
+    if (before.has(profile.name) || seen.has(profile.name)) continue;
+    seen.add(profile.name);
+    added.push(profile.name);
+  }
+  return added;
+}
+
+/** #23：新子智能体上线的一次性系统提示正文（相关即提示，不相关忽略）。 */
+export function buildNewAgentProfilesAvailableBody(names: readonly string[]): string {
+  const listed = names.map((name) => `- ${name}`).join("\n");
+  return [
+    "New subagents are now available in this session:",
+    "",
+    listed,
+    "",
+    "Use the Agent tool with the matching subagent_type when the task calls for one of them; otherwise ignore this notice.",
+  ].join("\n");
+}
+
 export function formatAgentProfilesForPrompt(
   profiles: readonly AgentProfile[],
   options: { embeddedSearchEnabled?: boolean } = {},

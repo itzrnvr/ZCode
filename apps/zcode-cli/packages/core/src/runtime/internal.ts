@@ -117,6 +117,8 @@ export interface AgentRuntimeInternal
   sessionMailboxPort?: SessionMailboxPort;
   sessionPersisted: boolean;
   needsPlanModeExitReminder: boolean;
+  /** #23：turn 边界刷新出的新增子智能体名，待 turn-loop 按相关性提示一次后清空。 */
+  pendingNewAgentProfileNames: string[] | undefined;
   latestConversationMessageId?: MessageId;
   latestAssistantMessageId?: MessageId;
   latestAssistantTurnId?: TurnId;
