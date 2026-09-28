@@ -12,7 +12,7 @@
 /** 离底判定容差：小于该距离视为「在底部」。取值覆盖亚像素滚动与最后一行 padding。 */
 const BOTTOM_ANCHOR_EPSILON_PX = 48;
 
-interface TimelineScrollMetrics {
+export interface TimelineScrollMetrics {
   /** 滚动容器 scrollTop。 */
   scrollTop: number;
   /** 滚动容器可视高度（clientHeight）。 */

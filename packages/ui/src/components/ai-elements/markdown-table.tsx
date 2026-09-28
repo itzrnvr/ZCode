@@ -67,6 +67,18 @@ const MARKDOWN_TABLE_CONTENT_PADDING_DEFAULT_PX = 32;
 const MARKDOWN_TABLE_CONTENT_PADDING_LG_PX = 16;
 const MARKDOWN_TABLE_CONTENT_PADDING_MD_PX = 8;
 const MARKDOWN_TABLE_STICKY_SCROLLBAR_HEIGHT_RATIO = 0.8;
+/**
+ * #4：rect 签名轮询的节拍。
+ *
+ * 这个轮询是 ResizeObserver 的兜底（status panel 收起/展开只改 root 的左右位置，
+ * RO 不一定触发）。原来按 rAF 跑：快滚时每挂载一个表格就多一条每帧轮询链，实测
+ * 60 帧里 markdown-table 贡献 244 次 rAF 调度（占全部额外 rAF 的 21%），并且每帧
+ * 读两次 getBoundingClientRect。改成 100ms 节拍后同样能在 800ms 观察窗内跟上
+ * 150–300ms 的布局过渡（最坏晚一拍的借位宽度更新），但每帧成本归零。
+ */
+const MARKDOWN_TABLE_RECT_WATCH_INTERVAL_MS = 100;
+/** 一次触发后的观察窗；窗内按上面的节拍继续比对 rect 签名。 */
+const MARKDOWN_TABLE_RECT_WATCH_WINDOW_MS = 800;
 const MARKDOWN_TABLE_LAYOUT_LEFT_INSET_PROPERTY = "--markdown-table-layout-left-inset";
 const MARKDOWN_TABLE_LAYOUT_RIGHT_INSET_PROPERTY = "--markdown-table-layout-right-inset";
 
@@ -751,7 +763,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
     // 表格 viewport 需要先按内容自然宽度排布，再最多扩展到当前 frame 宽度
     // 加上右侧可借用空间；直接 w-full 会丢失小表格按内容收缩的布局语义。
     let rafId: number | null = null;
-    let rectWatchRafId: number | null = null;
+    let rectWatchTimerId: number | null = null;
     let rectWatchUntil = 0;
     let latestRootRect = readMarkdownTableObservedRect(root);
     let latestFrameRect = readMarkdownTableObservedRect(frame);
@@ -766,7 +778,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
       });
     };
     const watchRectChanges = () => {
-      rectWatchRafId = null;
+      rectWatchTimerId = null;
       const nextRootRect = readMarkdownTableObservedRect(root);
       const nextFrameRect = readMarkdownTableObservedRect(frame);
       const rectChanged =
@@ -782,14 +794,17 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
       }
 
       if (performance.now() < rectWatchUntil) {
-        rectWatchRafId = requestAnimationFrame(watchRectChanges);
+        rectWatchTimerId = window.setTimeout(watchRectChanges, MARKDOWN_TABLE_RECT_WATCH_INTERVAL_MS);
       }
     };
     const scheduleMeasureAndWatchRect = () => {
       scheduleMeasure();
-      rectWatchUntil = performance.now() + 800;
-      if (rectWatchRafId === null) {
-        rectWatchRafId = requestAnimationFrame(watchRectChanges);
+      rectWatchUntil = performance.now() + MARKDOWN_TABLE_RECT_WATCH_WINDOW_MS;
+      if (rectWatchTimerId === null) {
+        rectWatchTimerId = window.setTimeout(
+          watchRectChanges,
+          MARKDOWN_TABLE_RECT_WATCH_INTERVAL_MS,
+        );
       }
     };
     const mutationObserver =
@@ -810,7 +825,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
         window.removeEventListener("resize", scheduleMeasureAndWatchRect);
         mutationObserver?.disconnect();
         if (rafId !== null) cancelAnimationFrame(rafId);
-        if (rectWatchRafId !== null) cancelAnimationFrame(rectWatchRafId);
+        if (rectWatchTimerId !== null) window.clearTimeout(rectWatchTimerId);
       };
     }
 
@@ -826,7 +841,7 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
       window.removeEventListener("resize", scheduleMeasureAndWatchRect);
       mutationObserver?.disconnect();
       if (rafId !== null) cancelAnimationFrame(rafId);
-      if (rectWatchRafId !== null) cancelAnimationFrame(rectWatchRafId);
+      if (rectWatchTimerId !== null) window.clearTimeout(rectWatchTimerId);
     };
   }, [commitScrollbarWidth, commitViewportMaxWidth, measureViewportMaxWidth]);
 
