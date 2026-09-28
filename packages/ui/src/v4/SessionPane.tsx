@@ -1918,6 +1918,25 @@ export function SessionPane({
           return;
         }
 
+        // Optimistic tab first: open the pane on a local placeholder child id so the
+        // user sees the side chat instantly, then reconcile to the real backend
+        // session id once the create command acknowledges.
+        const optimisticChildSessionId = `optimistic-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`;
+        onOpenSelectionSideChat({
+          workspacePath,
+          ...(workspaceIdentity ? { workspaceIdentity } : {}),
+          ...(remoteSessionId ? { remoteSessionId } : {}),
+          parentSessionId: sessionId,
+          childSessionId: optimisticChildSessionId,
+          ...(replacesChildSessionId ? { replacesChildSessionId } : {}),
+        });
+        if (reference) {
+          dispatchConversationSelectionAdd({
+            targetSessionId: optimisticChildSessionId,
+            workspaceKey,
+            reference,
+          });
+        }
         const childSessionId = await createSelectionSideChat(selectionSideChatKey, async () => {
           const ack = await dispatchCommand("createSelectionSideSession", {}, sessionId);
           if (
@@ -1934,7 +1953,7 @@ export function SessionPane({
           ...(remoteSessionId ? { remoteSessionId } : {}),
           parentSessionId: sessionId,
           childSessionId,
-          ...(replacesChildSessionId ? { replacesChildSessionId } : {}),
+          replacesChildSessionId: optimisticChildSessionId,
         });
         if (reference) {
           dispatchConversationSelectionAdd({
