@@ -36,7 +36,9 @@ import {
   matchesRequiredMcpServer,
 } from "../../subagent/mcp-config.js";
 import { mirrorSubagentToolEvent } from "../../subagent/tool-event-mirror.js";
-import { isBuiltInExploreAgentProfile } from "../../subagent/profile.js";
+import { isBuiltInExploreAgentProfile, normalizeBuiltInSelectionOverrides } from "../../subagent/profile.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildSubagentChildDisallowRules,
   filterSubagentChildToolNames,
@@ -71,6 +73,26 @@ export function createDefaultSubagentPort(
     outputRootDir: this.config.subagents?.outputRootDir,
     profiles: this.config.subagents?.profiles,
     builtInModelSelectionOverrides: this.config.subagents?.builtInModelSelectionOverrides,
+    getBuiltInModelSelectionOverrides: () => {
+      const storageRoot = this.config.memory?.storageRoot;
+      if (storageRoot) {
+        try {
+          const filePath = join(storageRoot, "v2", "agents-state.json");
+          if (existsSync(filePath)) {
+            const raw = readFileSync(filePath, "utf8");
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === "object" && "builtInModelSelectionOverrides" in parsed) {
+              return normalizeBuiltInSelectionOverrides(
+                (parsed as { builtInModelSelectionOverrides: unknown }).builtInModelSelectionOverrides,
+              );
+            }
+          }
+        } catch {
+          // 存储文件解析失败时回落到配置内存值
+        }
+      }
+      return this.config.subagents?.builtInModelSelectionOverrides;
+    },
     runtimeTaskRegistry: this.runtimeTaskRegistry,
     emitParentEvent: async (event, traceContext) => {
       if (isStaleBranchRuntimeTaskEvent(this, event)) return;

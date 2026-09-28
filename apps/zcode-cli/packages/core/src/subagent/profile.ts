@@ -1,10 +1,11 @@
 import { basename } from "node:path";
 import { GENERAL_PURPOSE_AGENT_TYPE, buildGeneralPurposeSystemPrompt } from "./general-purpose.js";
 import { EXPLORE_AGENT_TYPE } from "./explore.js";
+export { EXPLORE_AGENT_TYPE } from "./explore.js";
 import { formatExploreAllowedToolsForAgentDescription } from "./explore-tools.js";
 import { parseAgentFrontmatter, splitMarkdownFrontmatter } from "./profile-frontmatter.js";
 import { filterSubagentChildToolNames } from "./tool-policy.js";
-import type { ModelSelection } from "@zcode/shared";
+import { modelSelectionSchema, type ModelSelection } from "@zcode/shared";
 import { resolveProfileModelSelection } from "./profile-model-selection.js";
 
 export const DEFAULT_SUBAGENT_TYPE = GENERAL_PURPOSE_AGENT_TYPE;
@@ -13,6 +14,20 @@ export type BuiltInSubagentModelSelectionOverrides = Partial<
   Record<typeof DEFAULT_SUBAGENT_TYPE | typeof EXPLORE_AGENT_TYPE, ModelSelection>
 >;
 
+export function normalizeBuiltInSelectionOverrides(
+  structured: unknown,
+): BuiltInSubagentModelSelectionOverrides {
+  const result: BuiltInSubagentModelSelectionOverrides = {};
+  const structuredRecord =
+    typeof structured === "object" && structured !== null && !Array.isArray(structured)
+      ? (structured as Record<string, unknown>)
+      : {};
+  const generalPurpose = modelSelectionSchema.safeParse(structuredRecord[DEFAULT_SUBAGENT_TYPE]);
+  const explore = modelSelectionSchema.safeParse(structuredRecord[EXPLORE_AGENT_TYPE]);
+  if (generalPurpose.success) result[DEFAULT_SUBAGENT_TYPE] = generalPurpose.data;
+  if (explore.success) result[EXPLORE_AGENT_TYPE] = explore.data;
+  return result;
+}
 export type AgentPermissionMode = "auto" | "plan";
 
 export type AgentProfileSource = "built-in" | "project" | "user";
