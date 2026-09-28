@@ -12,7 +12,7 @@ import {
 } from "../../plugin-reference/index.js";
 import { createMessageId, traceContextToLogContext } from "../deps.js";
 import type { McpConnectionSnapshot, TraceContext } from "../deps.js";
-import { settleWithin } from "./mcp.js";
+import { DEFAULT_WAIT_TIMEOUT_MS, settleWithin } from "../withDeadline.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
 async function collectLiveMcpServers(
@@ -31,6 +31,7 @@ async function collectLiveMcpServers(
     ? await settleWithin<McpConnectionSnapshot | undefined>(
         runtime.mcpStartupPromise.catch(() => undefined),
         undefined,
+        DEFAULT_WAIT_TIMEOUT_MS,
       )
     : undefined;
   const registeredToolNames = new Set(runtime.getTools().map((tool) => tool.name));

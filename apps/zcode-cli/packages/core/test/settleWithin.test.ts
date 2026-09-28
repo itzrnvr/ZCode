@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { settleWithin } from "../src/runtime/methods/mcp.ts";
+import { settleWithin } from "../src/runtime/withDeadline.ts";
 
 test("settleWithin returns the value when the work settles first", async () => {
   const started = Date.now();
