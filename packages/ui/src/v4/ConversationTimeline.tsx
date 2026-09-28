@@ -1814,10 +1814,10 @@ function ConversationTimelineImpl({
                 data-v4-timeline-virtual-history="true"
                 data-v4-timeline-content-column="true"
                 className={cn(
-                  // 虚拟历史容器在滚动每帧挂载/卸载行：width/max-width 过渡会逐帧强制
-                  // layout 重算（快滚抖动）。只过渡 transform（面板让位位移动画保留），
-                  // 宽度切换对历史行 instantaneous——可接受，滚动顺滑优先。
-                  "relative mx-auto w-full shrink-0 transition-[transform] duration-150 ease-out",
+                  // 默认（< 1280px）过渡 width/max-width/transform，让 w-full ↔ max-w-4xl
+                  // 的中等宽度切换平滑；≥1280px 触发的面板让位（max-w-6xl + 168px 左移）
+                  // 用 @min-[1280px] 降级为只过渡 transform，避免大范围跳变叠加位移抖动。
+                  "relative mx-auto w-full shrink-0 transition-[width,max-width,transform] duration-150 ease-out @min-[1280px]/conversation:transition-[transform]",
                   contentWidthClassName,
                   summaryPanelInlineOffsetClassName,
                 )}
