@@ -3023,9 +3023,9 @@ export function SessionPane({
   const handleFork = useCallback(
     (target: ConversationRowTarget) => {
       const current = snapshotRef.current;
-      if (!sessionId || current === null) return;
+      if (!sessionId || current === null) return Promise.resolve();
       // forkAssistant 是 CAS 命令：baseRevision 取当前投影 revision。
-      void dispatchCommand(
+      return dispatchCommand(
         "forkAssistant",
         { target },
         sessionId,
@@ -3034,15 +3034,29 @@ export function SessionPane({
       ).then((ack) => {
         if (ack.status !== "accepted" && ack.status !== "duplicate") {
           logger.warn(`[v4-pane] fork 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+          toast(
+            intl.formatMessage(
+              { id: "chat.message.fork.failed" },
+              { error: ack.reasonCode ?? ack.status },
+            ),
+          );
           return;
         }
         if (ack.result?.type === "forkAssistant") {
           // 原地切到 child session（与新建会话同一选择路径）。
           onSessionCreated?.(ack.result.sessionId);
         }
+      }).catch((err) => {
+        logger.error("[v4-pane] fork error:", err);
+        toast(
+          intl.formatMessage(
+            { id: "chat.message.fork.failed" },
+            { error: err instanceof Error ? err.message : String(err) },
+          ),
+        );
       });
     },
-    [dispatchCommand, onSessionCreated, sessionId],
+    [dispatchCommand, intl, onSessionCreated, sessionId],
   );
 
   const handleEdit = useCallback(
