@@ -63,6 +63,27 @@ body {
   overflow: hidden;
 }
 
+/*
+ * 外观设置里的“使用手型光标”关闭时，根节点会带 data-pointer-cursors="off"。
+ * 规则故意不放进 @layer：只有未分层的声明才能稳定压过 Tailwind utilities 里的 cursor-pointer，
+ * 否则列表行、卡片这类自带工具类的元素仍会显示手型光标。
+ */
+:root[data-pointer-cursors="off"]
+  :is(
+    a,
+    button,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="option"],
+    summary,
+    label[for],
+    select,
+    .cursor-pointer
+  ) {
+  cursor: default;
+}
+
 /* 中文模板描述按单字断行会拆开“简报”等词组，并把标点挤到下一行。
  * Chromium 支持时启用短语级换行；其它环境保留正常断行，避免 keep-all 在窄屏产生溢出。 */
 .text-wrap-phrase {

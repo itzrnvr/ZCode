@@ -2,7 +2,13 @@ import { cn } from "@/components/lib/utils.js";
 import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
 
 /** Fork: Blackbird B mark (amber on transparent). Same geometry as the approved icon. */
-function BlackbirdAboutMark({ className }: { className?: string }) {
+export function BlackbirdAboutMark({
+  className,
+  animated = false,
+}: {
+  className?: string;
+  animated?: boolean;
+}) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -14,6 +20,16 @@ function BlackbirdAboutMark({ className }: { className?: string }) {
       aria-hidden="true"
       focusable="false"
     >
+      {/* 启动壳徽标复用 B mark 时保留同款呼吸闪烁；About/wordmark 不传 animated，保持静态。 */}
+      {animated ? (
+        <animate
+          attributeName="opacity"
+          begin="3s"
+          dur="1.8s"
+          repeatCount="indefinite"
+          values="1;0.4;1"
+        />
+      ) : null}
       <rect x="78" y="14" width="100" height="190" rx="18" fill="#F5AE4D" />
       <rect x="78" y="14" width="100" height="92" rx="18" fill="#F5AE4D" />
       <rect x="78" y="112" width="108" height="92" rx="20" fill="#F5AE4D" />

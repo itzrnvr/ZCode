@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
+import { BlackbirdAboutMark } from "@/components/ui/ZCodeAboutLogo.js";
 import { cn } from "@/components/lib/utils.js";
 
 interface RootStartupLoadingProps {
@@ -28,7 +30,12 @@ export function RootStartupLoading({ label, children, busy = true }: RootStartup
 export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean }) {
   return (
     <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] shadow-xl/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border before:border-[rgba(255,255,255,0.1)] before:content-['']">
-      <ZCodeStartupLogo className="h-auto w-14" animated={animated} />
+      {/* Fork: Blackbird 启动/引导徽标换成 About B mark；stock 保持原 Z，闪烁行为一致。 */}
+      {ZCODE_PRODUCT_FLAVOR === "blackbird" ? (
+        <BlackbirdAboutMark className="h-auto w-14" animated={animated} />
+      ) : (
+        <ZCodeStartupLogo className="h-auto w-14" animated={animated} />
+      )}
     </div>
   );
 }

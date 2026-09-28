@@ -1,4 +1,5 @@
 import { readSafeLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
+import { cssColorToHex } from "./colorModels.js";
 
 export const UI_COLORS_STORAGE_KEY = "zcode-ui-colors";
 
@@ -10,6 +11,7 @@ export const UI_COLORS_STORAGE_KEY = "zcode-ui-colors";
 export const UI_COLOR_TOKENS = {
   accent: "--color-brand",
   background: "--color-background",
+  foreground: "--color-foreground",
   sidebar: "--color-sidebar",
   card: "--color-card",
 } as const;
@@ -94,6 +96,10 @@ export function applyUiColors(colors: UiColors): void {
   }
 }
 
+/**
+ * 供不持有主窗口 store 的入口（如资源管理器窗口）跟随其他窗口写入的颜色覆盖；
+ * 持有 store 的入口必须经 setter 更新，确保 store 状态与 DOM 收敛到同一值。
+ */
 export function subscribeToUiColorsStorageChanges(): () => void {
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== UI_COLORS_STORAGE_KEY) {
@@ -105,4 +111,27 @@ export function subscribeToUiColorsStorageChanges(): () => void {
 
   window.addEventListener("storage", handleStorage);
   return () => window.removeEventListener("storage", handleStorage);
+}
+
+/**
+ * Token 当前生效色的十六进制值（未覆盖时即主题解析值），供取色器作为起点。
+ *
+ * 不能直接读根节点的变量：Token 多为 `var(--color-neutral-*)` 这类链，
+ * 计算值会序列化成 oklch()/color-mix() 而不是 hex。这里让探针元素实际取一次色，
+ * 再按绘制结果归一化，任何色彩空间都能落到 #rrggbb。
+ */
+export function readUiColorToken(field: UiColorField, fallback = "#000000"): string {
+  if (typeof document === "undefined" || !document.body) {
+    return fallback;
+  }
+
+  const probe = document.createElement("div");
+  probe.style.cssText = `position:fixed;left:-9999px;top:0;width:1px;height:1px;background-color:var(${UI_COLOR_TOKENS[field]})`;
+  try {
+    document.body.append(probe);
+    const painted = getComputedStyle(probe).backgroundColor;
+    return normalizeUiColor(painted) ?? cssColorToHex(painted) ?? fallback;
+  } finally {
+    probe.remove();
+  }
 }

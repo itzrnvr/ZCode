@@ -235,6 +235,10 @@ export function useAppPanels(options: {
       sidePaneOwnerIdRef.current,
       false,
     );
+    saveTaskSidePaneMemoryState(
+      activeSidePaneMemoryKeyRef.current,
+      latestSidePaneMemoryRef.current,
+    );
   }, []);
 
   const commitSidePaneState = useCallback(
@@ -248,6 +252,11 @@ export function useAppPanels(options: {
         sidePaneState: next,
       };
       setSidePaneState(next);
+      // 立即持久化到 localStorage，避免 Electron 退出时 React cleanup 未执行导致 side chat 丢失
+      saveTaskSidePaneMemoryState(
+        activeSidePaneMemoryKeyRef.current,
+        latestSidePaneMemoryRef.current,
+      );
       return next;
     },
     [],
