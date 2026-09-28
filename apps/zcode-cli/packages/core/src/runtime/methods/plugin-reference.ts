@@ -12,7 +12,8 @@ import {
 } from "../../plugin-reference/index.js";
 import { createMessageId, traceContextToLogContext } from "../deps.js";
 import type { McpConnectionSnapshot, TraceContext } from "../deps.js";
-import { settleWithin } from "./mcp.js";
+import { settleWithin } from "../withDeadline.js";
+import { MCP_TOOL_REGISTRATION_WAIT_MS } from "./mcp.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
 async function collectLiveMcpServers(
@@ -24,13 +25,20 @@ async function collectLiveMcpServers(
   // initializeMcp 幂等；turn loop 的首个 provider 请求前本来就会等它，
   // 这里提前 await 不增加额外等待。引用绝不触发 connect/reconnect/OAuth——只读取现状。
   await runtime.initializeMcp(traceContext);
-  const statuses = await runtime.mcpPort.status();
+  // status() 也是 RPC：端口卡住时它同样会挂住，这里给一个上限，
+  // 拿不到状态就当没有已连接 server（提醒宁可少报也不拖住轮次）。
+  const statuses = await settleWithin(
+    runtime.mcpPort.status(),
+    {} as Awaited<ReturnType<typeof runtime.mcpPort.status>>,
+    MCP_TOOL_REGISTRATION_WAIT_MS,
+  );
   // 提醒只是注入信息，绝不为了等 MCP settle 拖住轮次：与注册路径共用同一截止时间，
   // 超时按“快照未知”处理（provider 可见数记 0，宁可少报也不虚报能力）。
   const snapshot = runtime.mcpStartupPromise
     ? await settleWithin<McpConnectionSnapshot | undefined>(
         runtime.mcpStartupPromise.catch(() => undefined),
         undefined,
+        MCP_TOOL_REGISTRATION_WAIT_MS,
       )
     : undefined;
   const registeredToolNames = new Set(runtime.getTools().map((tool) => tool.name));

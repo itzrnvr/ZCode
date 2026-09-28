@@ -12,6 +12,7 @@ import type {
   TraceContext,
 } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
+import { settleWithin } from "../withDeadline.js";
 
 const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
 
@@ -21,7 +22,7 @@ const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
  * 先注册，其余 server settle 后再补注册；工具真正被调用时连接仍未就绪会由
  * callTool 在调用点报错，而不是阻塞会话/轮次。
  */
-const MCP_TOOL_REGISTRATION_WAIT_MS = 1_500;
+export const MCP_TOOL_REGISTRATION_WAIT_MS = 1_500;
 
 /**
  * 只有同时携带 resolver 注入的官方 plugin id 和本进程私有 authority 的 server 才能共享
@@ -132,38 +133,6 @@ export function startMcpStartup(
   return this.mcpStartupPromise;
 }
 
-/**
- * 等到 promise settle，超时则回退到 fallback。
- * 补充注册与提醒注入都走这条路径：这些信息是“锦上添花”，
- * 任何上游卡住都不允许再把首个 provider 请求拖住。
- */
-export function settleWithin<T>(
-  promise: Promise<T>,
-  fallback: T,
-  timeoutMs: number = MCP_TOOL_REGISTRATION_WAIT_MS,
-  onTimeout?: () => void,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    // 计时器必须保持 ref（默认状态）：unref 的计时器在事件循环空闲时不会触发，
-    // 单发 CLI 场景下这个“截止时间”会静默失效，首个轮次又会被上游拖住。
-    // 提前 settle 时清掉它，避免多留一个待触发的计时器。
-    const timer = setTimeout(() => {
-      onTimeout?.();
-      resolve(fallback);
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
 export async function initializeMcp(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
@@ -215,6 +184,16 @@ export async function initializeMcp(
       });
     }
   };
+
+  if (serverCount === 0) {
+    // 没配置 server 时这里只做存量工具发现，没有任何连接需要等：
+    // 交给后台补注册，首个轮次直接放行。
+    void startup.then(
+      (snapshot) => registerFromTools(snapshot.tools, "connected"),
+      () => undefined,
+    );
+    return;
+  }
 
   let timedOut = false;
   const settled = await settleWithin(
