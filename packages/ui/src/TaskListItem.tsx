@@ -67,6 +67,8 @@ interface TaskListItemProps {
   onStartRenameTask: (taskId: string, currentTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onMarkTaskAsUnread: (taskId: string) => void;
+  onMovePinnedItemUp?: () => void;
+  onMovePinnedItemDown?: () => void;
   onOpenTaskContextMenu?: (taskId: string) => void;
   onOpenFileTree?: (task: ZCodeTaskMeta) => void;
   variant?: "default" | "timeline";
@@ -128,6 +130,8 @@ function areTaskListItemPropsEqual(left: TaskListItemProps, right: TaskListItemP
     left.onStartRenameTask === right.onStartRenameTask &&
     left.onArchiveTask === right.onArchiveTask &&
     left.onMarkTaskAsUnread === right.onMarkTaskAsUnread &&
+    left.onMovePinnedItemUp === right.onMovePinnedItemUp &&
+    left.onMovePinnedItemDown === right.onMovePinnedItemDown &&
     left.onOpenTaskContextMenu === right.onOpenTaskContextMenu &&
     left.onOpenFileTree === right.onOpenFileTree
   );
@@ -806,6 +810,8 @@ export function TaskListItemContextMenuContent({
   onStartRenameTask,
   onArchiveTask,
   onMarkTaskAsUnread,
+  onMovePinnedItemUp,
+  onMovePinnedItemDown,
   disableTaskActions = false,
   disabledReason,
 }: {
@@ -818,6 +824,8 @@ export function TaskListItemContextMenuContent({
   onStartRenameTask: (taskId: string, currentTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onMarkTaskAsUnread: (taskId: string) => void;
+  onMovePinnedItemUp?: () => void;
+  onMovePinnedItemDown?: () => void;
   disableTaskActions?: boolean;
   disabledReason?: string;
 }) {
@@ -916,6 +924,8 @@ export function TaskListItemContextMenuContent({
       onTogglePinTask={() => {
         onTogglePinTask(task.taskId, !isPinned);
       }}
+      onMovePinnedItemUp={onMovePinnedItemUp}
+      onMovePinnedItemDown={onMovePinnedItemDown}
       onStartRenameTask={() => {
         onStartRenameTask(task.taskId, task.title);
       }}

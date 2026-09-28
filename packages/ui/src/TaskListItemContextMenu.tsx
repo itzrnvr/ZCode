@@ -13,6 +13,8 @@ export function TaskListItemContextMenu({
   activeSessionId,
   taskNativeSessionLogFile,
   onTogglePinTask,
+  onMovePinnedItemUp,
+  onMovePinnedItemDown,
   onStartRenameTask,
   onArchiveTask,
   onMarkTaskAsUnread,
@@ -41,6 +43,8 @@ export function TaskListItemContextMenu({
     exists: boolean;
   };
   onTogglePinTask: () => void;
+  onMovePinnedItemUp?: () => void;
+  onMovePinnedItemDown?: () => void;
   onStartRenameTask: () => void;
   onArchiveTask: () => void;
   onMarkTaskAsUnread: () => void;
@@ -70,6 +74,8 @@ export function TaskListItemContextMenu({
         Item={ContextMenuItem}
         Separator={ContextMenuSeparator}
         onTogglePinTask={onTogglePinTask}
+        onMovePinnedItemUp={onMovePinnedItemUp}
+        onMovePinnedItemDown={onMovePinnedItemDown}
         onStartRenameTask={onStartRenameTask}
         onArchiveTask={onArchiveTask}
         onMarkTaskAsUnread={onMarkTaskAsUnread}
