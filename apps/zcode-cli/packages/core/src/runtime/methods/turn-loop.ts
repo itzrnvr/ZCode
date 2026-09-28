@@ -18,8 +18,11 @@ import {
 } from "../helpers/index.js";
 import {
   systemReminderAttachmentEntry,
+  systemReminderRuntimeMetadata,
   todoReminderRuntimeMetadata,
 } from "../../agent/message-history.js";
+import { buildNewAgentProfilesNoticeEntry } from "./embedded-search-branch.js";
+import { buildNewAgentProfilesAvailableBody } from "../../subagent/profile.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import { runModelBackedTurnStep } from "./turn-model-step.js";
 import {
@@ -154,6 +157,28 @@ export async function runRegularTurnLoop(
         traceContext: state.turnTraceContext,
       });
     }
+    const pendingNewAgentNames = this.pendingNewAgentProfileNames;
+    this.pendingNewAgentProfileNames = undefined;
+    const newAgentNoticeEntry =
+      !outputTokenRecoveryActive && pendingNewAgentNames && pendingNewAgentNames.length > 0
+        ? buildNewAgentProfilesNoticeEntry(pendingNewAgentNames)
+        : null;
+    if (newAgentNoticeEntry) {
+      // “相关即提示”：本轮输入点名新 agent 或表达派发意图时才打断模型；
+      // 否则静默丢弃——Agent 工具描述里已列出新名，调用不受影响。
+      // 一次性消费：无论是否提示，本轮后不再重复。
+      if (isNewAgentNoticeRelevant(state.input, pendingNewAgentNames ?? [])) {
+        commitTurnRequestEntries(this, state.turnRequestState, [newAgentNoticeEntry]);
+        await this.persistSyntheticUserNoticeForSession({
+          messageID: createMessageId(),
+          metadata: { runtimeMessage: systemReminderRuntimeMetadata("shell_environment_change") },
+          sessionId: this.sessionId,
+          source: "subagent",
+          text: buildNewAgentProfilesAvailableBody(pendingNewAgentNames ?? []),
+          traceContext: state.turnTraceContext,
+        });
+      }
+    }
     const outputStyleReminderBody =
       state.modelStepCount === 0
         ? buildRuntimeOutputStyleReminderBody(state.turnOutputStyle)
@@ -216,6 +241,28 @@ export async function runRegularTurnLoop(
       break;
     }
   }
+}
+
+/**
+ * #23 相关性门：新 agent 上线只在“本轮可能用到它”时打断模型。
+ * 点名（输入含新增名之一，不分大小写）或泛派发意图（agent/subagent/派发/委托/调用它）才提示；
+ * 否则静默——Agent 工具描述里已列出新名，调用不受影响。
+ */
+function isNewAgentNoticeRelevant(input: string, addedNames: readonly string[]): boolean {
+  const text = input.toLowerCase();
+  for (const name of addedNames) {
+    if (name.trim().length > 0 && text.includes(name.toLowerCase())) return true;
+  }
+  return (
+    text.includes("agent") ||
+    text.includes("subagent") ||
+    text.includes("delegate") ||
+    text.includes("dispatch") ||
+    input.includes("派发") ||
+    input.includes("委托") ||
+    input.includes("子智能体") ||
+    input.includes("调用它")
+  );
 }
 
 function buildTurnDisallowedTools(state: RegularTurnLoopState): Set<string> | null {

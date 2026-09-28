@@ -7,6 +7,9 @@ import {
   resolveRuntimeDynamicWorkflowToolsIncluded,
 } from "../helpers/tool-allowlist.js";
 import { isToolNameDisallowed } from "../../tool/tool-visibility.js";
+import type { AgentProfile } from "../../subagent/profile.js";
+import { buildNewAgentProfilesAvailableBody } from "../../subagent/profile.js";
+import { systemReminderAttachmentEntry } from "../../agent/message-history.js";
 
 export function resolveRuntimeEmbeddedSearchEnabled(runtime: AgentRuntimeInternal): boolean {
   const builtInToolAllowlist = resolveBuiltInToolAllowlist(runtime.config);
@@ -16,6 +19,39 @@ export function resolveRuntimeEmbeddedSearchEnabled(runtime: AgentRuntimeInterna
       !isToolNameDisallowed("Bash", runtime.config.toolDisallowlist),
   });
   return decision.useEmbeddedSearchBranch;
+}
+
+/**
+ * #23：新 profile 名集合判脏（新增、删除、重命名触发；纯正文改不动名字则不打扰模型）。
+ * 供 bootstrap 在 turn 边界做“是否需要重建 Agent/Task 描述”的判断。
+ */
+export function subagentProfileNameSetChanged(
+  previous: readonly AgentProfile[],
+  current: readonly AgentProfile[],
+): boolean {
+  return !sameAgentProfileNameSet(previous, current);
+}
+
+function sameAgentProfileNameSet(
+  left: readonly AgentProfile[],
+  right: readonly AgentProfile[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const names = new Set(left.map((profile) => profile.name));
+  if (names.size !== left.length) return false;
+  for (const profile of right) {
+    if (!names.has(profile.name)) return false;
+  }
+  return true;
+}
+
+/** #23：把新增名包装成一次性的 turn 级系统提示 entry（调用方决定是否提交）。 */
+export function buildNewAgentProfilesNoticeEntry(names: readonly string[]) {
+  if (names.length === 0) return null;
+  return systemReminderAttachmentEntry(
+    "shell_environment_change",
+    buildNewAgentProfilesAvailableBody(names),
+  );
 }
 
 export function refreshBranchAwareBuiltInTools(runtime: AgentRuntimeInternal): void {

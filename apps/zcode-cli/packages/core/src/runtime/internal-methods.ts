@@ -37,6 +37,7 @@ import type {
 import type { BackgroundResultOriginMeta, ContextUsageBreakdownItem } from "@zcode/contracts";
 import type { RuntimeCommand, RuntimeCommandId } from "./command-queue.js";
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
+import type { AgentProfile } from "../subagent/profile.js";
 import type {
   ActiveTurnInfo,
   AcquireForegroundPromotionLeaseResult,
@@ -68,6 +69,7 @@ export interface AgentRuntimeCoreMethods {
   updateConfig(
     patch: Pick<AgentRuntimeConfig, "mode" | "planEnabled" | "language" | "outputStyle">,
   ): void;
+  refreshSubagentProfiles(profiles: readonly AgentProfile[]): string[];
   initializeSessionShellEnvironmentIfNeeded(
     selection: ExecutionShellSelection | (() => ExecutionShellSelection),
   ): boolean;

@@ -130,6 +130,15 @@ export type { PermissionConfig } from "./permission/index.js";
 
 // Runtime
 export { AgentRuntime } from "./runtime.js";
+// #23：settings 创建子智能体后，已激活会话在下一轮入口刷新可见集。
+export {
+  buildNewAgentProfilesNoticeEntry,
+  subagentProfileNameSetChanged,
+} from "./runtime/methods/embedded-search-branch.js";
+export {
+  buildNewAgentProfilesAvailableBody,
+  diffNewAgentProfileNames,
+} from "./subagent/profile.js";
 export { createExternalTurnFaultError } from "./runtime/helpers/turn-errors.js";
 export { repairPersistedRemoteSessionPaths } from "./runtime/helpers/persisted-remote-session-path-repair.js";
 // 「按值把一段转录复制进另一个会话」的克隆器。fork 之外的第二个消费者是 dwf 的 amend-resume

@@ -72,6 +72,9 @@ export function createDefaultSubagentPort(
     autoBackgroundMs: this.config.subagents?.autoBackgroundMs,
     outputRootDir: this.config.subagents?.outputRootDir,
     profiles: this.config.subagents?.profiles,
+    // 新建子智能体对已激活会话可见：端口每次 launch 都经此 getter 读当前配置，
+    // 下一步的 turn-start 刷新只换 config 引用即可生效，无需重建 runtime/port。
+    getAgentProfiles: () => this.config.subagents?.profiles,
     builtInModelSelectionOverrides: this.config.subagents?.builtInModelSelectionOverrides,
     getBuiltInModelSelectionOverrides: () => {
       const storageRoot = this.config.memory?.storageRoot;

@@ -30,7 +30,17 @@ import { applyRuntimeExecutionState } from "../execution-state.js";
 import { orderProviderVisibleToolContracts } from "../../tool/provider-visible-order.js";
 import { projectToolModelContract } from "../../tool/model-contract.js";
 import { rebuildContextPrefix } from "./context-refresh.js";
-import { filterEmbeddedSearchRuntimeVisibleTools } from "./embedded-search-branch.js";
+import {
+  filterEmbeddedSearchRuntimeVisibleTools,
+  resolveRuntimeEmbeddedSearchEnabled,
+  subagentProfileNameSetChanged,
+} from "./embedded-search-branch.js";
+import { createAgentToolEntry, createTaskToolEntry } from "../../tool/handlers/agent.js";
+import {
+  diffNewAgentProfileNames,
+  type AgentProfile,
+} from "../../subagent/profile.js";
+import { resolveRuntimeDynamicWorkflowToolsIncluded } from "../helpers/tool-allowlist.js";
 import {
   getSessionShellSelection as readSessionShellSelection,
   initializeSessionShellEnvironmentIfNeeded as initializeSessionShellEnvironment,
@@ -68,6 +78,57 @@ export function updateConfig(
       rebuildContextPrefix(this);
     }
   }
+}
+
+/**
+ * #23：settings 创建/更新/删除子智能体后，已激活会话在下一轮入口调用，
+ * 把新可见集装进本 runtime。只在名字集合变化时做装配（新增、删除、重命名触发；
+ * 纯正文改不动名字则不打扰模型）。幂等、无抛：装配失败保持旧快照。
+ * 返回本次新增的模型可见名（调用方/turn-loop 按相关性决定是否提示）。
+ */
+export function refreshSubagentProfiles(
+  this: AgentRuntimeInternal,
+  profiles: readonly AgentProfile[],
+): string[] {
+  const previous = this.config.subagents?.profiles ?? [];
+  if (!subagentProfileNameSetChanged(previous, profiles)) return [];
+  const added = diffNewAgentProfileNames(previous, profiles);
+  try {
+    this.config.subagents = {
+      ...this.config.subagents,
+      profiles: [...profiles],
+    };
+    // 描述里的 Explore 工具后缀与工作流行必须与装配时一致：用同一推导重建，
+    // 同名覆盖（silent），再失效工具缓存——与 shell 快照那条刷新路径同语义。
+    const embeddedSearchEnabled = resolveRuntimeEmbeddedSearchEnabled(this);
+    const dynamicWorkflowEnabled = resolveRuntimeDynamicWorkflowToolsIncluded(this.config);
+    this.registry.register(
+      createAgentToolEntry({
+        embeddedSearchEnabled,
+        profiles,
+        dynamicWorkflowEnabled,
+      }),
+      { silentDuplicateWarning: true },
+    );
+    this.registry.register(
+      createTaskToolEntry({
+        embeddedSearchEnabled,
+        profiles,
+        dynamicWorkflowEnabled,
+      }),
+      { silentDuplicateWarning: true },
+    );
+    this.cachedTools = null;
+  } catch {
+    return [];
+  }
+  if (added.length > 0) {
+    this.pendingNewAgentProfileNames = [
+      ...(this.pendingNewAgentProfileNames ?? []),
+      ...added.filter((name) => !(this.pendingNewAgentProfileNames ?? []).includes(name)),
+    ];
+  }
+  return added;
 }
 
 export function initializeSessionShellEnvironmentIfNeeded(
