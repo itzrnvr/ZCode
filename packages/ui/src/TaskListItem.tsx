@@ -69,7 +69,7 @@ interface TaskListItemProps {
   onMarkTaskAsUnread: (taskId: string) => void;
   onMovePinnedItemUp?: () => void;
   onMovePinnedItemDown?: () => void;
-  onOpenTaskContextMenu?: (taskId: string) => void;
+  onOpenTaskContextMenu?: (taskId: string, event?: { preventDefault: () => void; stopPropagation: () => void }) => void;
   onOpenFileTree?: (task: ZCodeTaskMeta) => void;
   variant?: "default" | "timeline";
   showPinAction?: boolean;
@@ -308,9 +308,12 @@ export const MemoTaskItem = memo(function TaskListItem({
   const handleDragEnd = useCallback(() => {
     clearActiveWorkbenchSessionDragPayload();
   }, []);
-  const handleContextMenu = useCallback(() => {
-    onOpenTaskContextMenu?.(task.taskId);
-  }, [onOpenTaskContextMenu, task.taskId]);
+  const handleContextMenu = useCallback(
+    (event: { preventDefault: () => void; stopPropagation: () => void }) => {
+      onOpenTaskContextMenu?.(task.taskId, event);
+    },
+    [onOpenTaskContextMenu, task.taskId],
+  );
   const handleOpenFileTree = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();
