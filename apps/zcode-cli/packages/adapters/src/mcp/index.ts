@@ -468,7 +468,13 @@ class NodeMcpAdapter implements McpPort {
 
     const record = this.records.get(request.serverName);
     if (!record?.client || record.status.status !== "connected") {
-      throw new Error(`MCP server is not connected: ${request.serverName}`);
+      // #4：调用点状态报错——server 未就绪/失败时报“什么状态、能不能等”，
+      // 而不是裸失败。调用方（模型）据此决定等待、换路或如实告知用户。
+      throw new Error(
+        `MCP server '${request.serverName}' is ${describeMcpServerReadiness(record?.status.status)}; ` +
+          `the server is still starting, is disabled, or has failed — do not retry immediately, ` +
+          `report the status if the task depends on it.`,
+      );
     }
 
     try {
@@ -1742,6 +1748,29 @@ class NodeMcpAdapter implements McpPort {
       protocolEra: extra.protocolEra,
       serverRequestId: extra.serverRequestId,
     };
+  }
+}
+
+/**
+ * #4：把连接状态翻译成调用方可行动的文案。unknown 只在 record 缺失时出现
+ * （未配置/未 lease），与 disabled/failed/connecting 走同一条“报状态别重试”语义。
+ */
+function describeMcpServerReadiness(status: McpServerStatus["status"] | undefined): string {
+  switch (status) {
+    case "connecting":
+      return "still starting (connecting)";
+    case "disconnected":
+      return "currently disconnected";
+    case "disabled":
+      return "disabled in Settings";
+    case "failed":
+      return "in failed state (see Settings → MCP for the error)";
+    case "untrusted":
+      return "untrusted (not authorized to connect)";
+    case "connected":
+      return "connected but has no ready client (transient — retry once)";
+    default:
+      return "not started or not configured for this session";
   }
 }
 
