@@ -156,6 +156,9 @@ export function resolveAppRuntimeConfig(input: {
       enabled: options.runtimeConfig?.mcp?.enabled ?? configResult.config.features.mcp,
       servers: autoConnectMcpServers,
       trustedOfficialCuaServerNames: [...trustedOfficialCuaServerNames],
+      // #4：resume 会话的激活关键路径（materialize + hydration）不与 MCP 连接突发
+      // 争用事件循环；连接改在 resumeFromStore 收尾启动，首轮 initializeMcp 仍幂等兜底。
+      deferStartupUntilResumed: options.resume === true,
     },
     hooks: mergeRuntimeHooks(
       options.runtimeConfig?.hooks

@@ -182,6 +182,13 @@ export interface AgentRuntimeConfig {
      * official plugins. Never derive this list from serialized MCP config.
      */
     trustedOfficialCuaServerNames?: readonly string[];
+    /**
+     * #4：冷恢复会话的激活路径（record materialize + resume hydration）不与 MCP
+     * 连接突发争用事件循环。置位后构造期与 context 初始化都不启动 MCP 连接，
+     * 改由 `resumeFromStore` 收尾启动；首轮 `initializeMcp` 仍会幂等兜底启动，
+     * 因此“resume 从未发生”的会话不会永久失去 MCP。
+     */
+    deferStartupUntilResumed?: boolean;
   };
   /**
    * Session 冻结的 Plugin 身份 catalog。
