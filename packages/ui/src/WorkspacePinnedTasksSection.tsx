@@ -37,10 +37,7 @@ interface PinnedTaskItemHandlers {
   onMarkTaskAsUnread: (taskId: string) => void;
   onMovePinnedItemUp: () => void;
   onMovePinnedItemDown: () => void;
-  onOpenTaskContextMenu: (
-    taskId: string,
-    event?: { preventDefault: () => void; stopPropagation: () => void },
-  ) => void;
+  onOpenTaskContextMenu: (taskId: string) => void;
   onOpenFileTree: (task: ZCodeTaskMeta) => void;
 }
 
@@ -394,13 +391,11 @@ export function WorkspacePinnedTasksSection({
     },
     [getCurrentPinnedItemContext],
   );
-  const openPinnedItemContextMenu = useCallback((itemKey: string, event?: { preventDefault: () => void; stopPropagation: () => void }) => {
+  const openPinnedItemContextMenu = useCallback((itemKey: string) => {
     // pinned row handler 按 itemKey 缓存；打开菜单时从 ref 读取最新确认态，
     // 避免 pendingArchiveItemKey 变化时重建所有 TaskListItem callback。
-    // 行级 onContextMenu 必须吞掉原生事件，否则 Radix section 菜单和行菜单打架，
-    // 实测行菜单（带 Move up/down）被 section 菜单盖住。
-    event?.preventDefault();
-    event?.stopPropagation();
+    // 注意：不能在这里 preventDefault/stopPropagation —— section 级 Radix
+    // ContextMenuTrigger 靠冒泡的 contextmenu 事件打开菜单，吞掉后菜单永远打不开。
     if (pendingArchiveItemKeyRef.current === itemKey) {
       setPendingArchiveItemKey(null);
     }
@@ -464,8 +459,8 @@ export function WorkspacePinnedTasksSection({
           onMovePinnedItemDown: () => {
             movePinnedItemDown(itemKey);
           },
-          onOpenTaskContextMenu: (_taskId, event) => {
-            openPinnedItemContextMenu(itemKey, event);
+          onOpenTaskContextMenu: () => {
+            openPinnedItemContextMenu(itemKey);
           },
           onOpenFileTree: (task) => {
             const target = resolveTaskFileTreeTargetFromTabs(task, workspaceTabsRef.current);
