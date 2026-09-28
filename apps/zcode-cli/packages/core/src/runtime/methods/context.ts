@@ -25,6 +25,7 @@ import { resolveEnabledProjectMemoryRoot } from "../helpers/project-memory.js";
 import { buildContextHistoryEntries } from "./context-history-entries.js";
 import { resolveRuntimeEmbeddedSearchEnabled } from "./embedded-search-branch.js";
 import { getContextSourceShellDisplayName } from "./session-shell-environment.js";
+import { shouldStartMcpStartupEagerly } from "./mcp.js";
 
 export { buildContextHistoryEntries };
 
@@ -61,7 +62,11 @@ export async function ensureContextInitialized(
   // Bash cd 之后 workingDirectory 会变化，但 workspaceRoot 仍表示会话初始工作区边界。
   this.workspaceRoot = snapshot.workingDirectory;
   this.contextSourceSnapshot = snapshot;
-  this.startMcpStartup(traceContext);
+  // #4：与构造期同一条门——冷恢复会话的 context 初始化仍处在激活关键路径上，
+  // 这里启动 MCP 会让 skills discovery / hydration 与连接突发互相争用。
+  if (shouldStartMcpStartupEagerly(this.config)) {
+    this.startMcpStartup(traceContext);
+  }
   this.skillLoadOutcome = await this.discoverSkillsForContext(traceContext);
   this.memoryRoot = await this.loadProjectMemoryRoot(traceContext);
   this.memoryIndexContent = await loadProjectMemoryIndexContent(this, this.memoryRoot);

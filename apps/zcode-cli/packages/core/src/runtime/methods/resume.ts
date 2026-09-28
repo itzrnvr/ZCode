@@ -314,6 +314,11 @@ export async function resumeFromStore(
     status: "completed",
   });
 
+  // #4：激活到此结束——冷恢复会话的 MCP 连接在这里启动（deferStartupUntilResumed），
+  // 连接突发不再与 materialize/hydration 争用事件循环。幂等：非 deferred 会话在
+  // 构造期已启动，这里复用同一个 startup promise，不会重连。
+  this.startMcpStartup(traceContext);
+
   return {
     ...hydration,
     directory: session.directory,

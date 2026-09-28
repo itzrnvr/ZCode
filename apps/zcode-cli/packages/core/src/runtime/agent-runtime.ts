@@ -68,6 +68,7 @@ import type {
   TurnId,
 } from "./deps.js";
 import { installAgentRuntimeMethods } from "./methods/index.js";
+import { shouldStartMcpStartupEagerly } from "./methods/mcp.js";
 import type { StartSavedWorkflowRunResult } from "./methods/dynamic-workflow-run-start.js";
 import type {
   AmendWorkflowRunSettingsInput,
@@ -306,7 +307,11 @@ export class AgentRuntime {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;
     }
-    runtime.startMcpStartup(this.rootTraceContext);
+    // #4：deferStartupUntilResumed 的会话（冷恢复）把 MCP 连接推到 resume 收尾，
+    // 激活关键路径不再与 stdio spawn/握手突发争用事件循环。
+    if (shouldStartMcpStartupEagerly(this.config)) {
+      runtime.startMcpStartup(this.rootTraceContext);
+    }
   }
 
   async closeBrowserSession(): Promise<void> {

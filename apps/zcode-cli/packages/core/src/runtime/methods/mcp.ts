@@ -51,6 +51,21 @@ export function computeOfficialCuaServerNames(
   return names;
 }
 
+/**
+ * #4：MCP 连接是否在 runtime 构造期/context 初始化就启动。
+ *
+ * 冷恢复会话（bootstrap 置位 `mcp.deferStartupUntilResumed`）的激活关键路径包含
+ * record materialize 与整段 resume hydration；在其间启动 MCP 会让 stdio 子进程
+ * spawn + 握手突发与 hydration 争用同一个事件循环（实测首开 3–5 s 的主要成分）。
+ * 这类会话改由 `resumeFromStore` 收尾启动，首轮 `initializeMcp` 仍幂等兜底，
+ * 因此“构造了但从未 resume”的会话不会永久失去 MCP。
+ */
+export function shouldStartMcpStartupEagerly(config: {
+  mcp?: { deferStartupUntilResumed?: boolean };
+}): boolean {
+  return config.mcp?.deferStartupUntilResumed !== true;
+}
+
 export function startMcpStartup(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
