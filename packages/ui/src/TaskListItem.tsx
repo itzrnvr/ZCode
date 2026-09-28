@@ -31,6 +31,7 @@ import { useModelTrajectoryStore } from "@/store/modelTrajectoryStore.js";
 import { buildTaskFeedbackDescription } from "@/lib/taskFeedbackDraft.js";
 import { toast } from "@/components/ui/toast.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
+import { requestAgentPrewarm } from "@/lib/agentPrewarm.js";
 import { useV4SplitPaneEntry } from "@/v4/splitPaneEntryContext.js";
 import { buildWorkbenchSessionKey, useWorkbenchGroupStore } from "@/v4/workbenchGroupStore.js";
 import { useTaskInteractionAutoResolutionSnooze } from "@/hooks/useTaskInteractionAutoResolutionSnooze.js";
@@ -355,9 +356,22 @@ export const MemoTaskItem = memo(function TaskListItem({
     },
     [isPinned, onTogglePinTask, task.taskId, workspaceActionsDisabled],
   );
+  // #4：hover 即意图。扁平列表的每一行都属于本列表的 workspace；该 workspace 不是
+  // 当前激活 tab 时，它的 agent 可能还没起（首次触达要付 spawn+boot ~1.55 s），
+  // 这里提前预热。远端行与激活 workspace 由 controller 直接跳过。
+  const activeWorkspaceKey = useOptionalTabStore((state) =>
+    buildTaskWorkspaceKey(state.activeWorkspacePath ?? "", state.activeWorkspaceIdentity ?? undefined),
+  );
+  const rowWorkspaceKey = buildTaskWorkspaceKey(workspacePath, task.workspaceIdentity);
   const handleMouseEnter = useCallback(() => {
     setHoverActionsVisible(true);
-  }, []);
+    requestAgentPrewarm({
+      workspacePath,
+      ...(task.workspaceIdentity ? { workspaceIdentity: task.workspaceIdentity } : {}),
+      ...(remoteSessionId ? { remoteSessionId } : {}),
+      isActiveWorkspace: rowWorkspaceKey === activeWorkspaceKey,
+    });
+  }, [activeWorkspaceKey, remoteSessionId, rowWorkspaceKey, task.workspaceIdentity, workspacePath]);
   const handleMouseLeave = useCallback(() => {
     setHoverActionsVisible(false);
     // 归档二次确认依赖用户第二次点击确认；鼠标离开 row 时清理 hover 展示即可。

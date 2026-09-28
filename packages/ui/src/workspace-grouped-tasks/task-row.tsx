@@ -22,6 +22,7 @@ import {
 } from "@/lib/taskListItemPresentation.js";
 import { getTaskChangeSummary } from "@/lib/taskChangeSummary.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
+import { requestAgentPrewarm } from "@/lib/agentPrewarm.js";
 import { buildTaskFeedbackDescription } from "@/lib/taskFeedbackDraft.js";
 import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
@@ -136,9 +137,21 @@ function GroupedTaskRowComponent({
   // 月亮身份改为持久 meta 标记判断；off-peak store 反查在任务被删除后会丢失
   // 会话溯源，且让每一行多背一个全局 store 订阅。
   const isTaskOffPeak = isOffPeakTask(task);
-  const isActive =
-    buildTaskWorkspaceKey(activeWorkspacePath, activeWorkspaceIdentity) === workspaceKey &&
-    activeTaskId === task.taskId;
+  const isActiveWorkspace =
+    buildTaskWorkspaceKey(activeWorkspacePath, activeWorkspaceIdentity) === workspaceKey;
+  const isActive = isActiveWorkspace && activeTaskId === task.taskId;
+  // #4：hover 即意图。当前激活 workspace 的 agent 必然在跑；其余行预热其所属
+  // workspace 的 agent，把「首次触达未激活 workspace」的 spawn+boot（实测 ~1.55 s）
+  // 挪到点击之前。远端行由 controller 直接跳过（本地 host 无权为其起进程）。
+  const handleRowHoverIntent = () => {
+    setTaskRowHovered(true);
+    requestAgentPrewarm({
+      workspacePath: task.workspacePath,
+      ...(task.workspaceIdentity ? { workspaceIdentity: task.workspaceIdentity } : {}),
+      ...(remoteSessionId ? { remoteSessionId } : {}),
+      isActiveWorkspace,
+    });
+  };
   const isMobileActive = false;
   const statusDotClassName =
     leadingIndicator === "error"
@@ -372,7 +385,7 @@ function GroupedTaskRowComponent({
       tabIndex={0}
       onClick={handleSelect}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setTaskRowHovered(true)}
+      onMouseEnter={handleRowHoverIntent}
       onMouseLeave={() => setTaskRowHovered(false)}
       onFocusCapture={() => setTaskRowFocusWithin(true)}
       onBlurCapture={(event) => {
