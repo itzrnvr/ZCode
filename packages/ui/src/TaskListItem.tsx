@@ -72,6 +72,7 @@ interface TaskListItemProps {
   variant?: "default" | "timeline";
   showPinAction?: boolean;
   intl: TaskListItemIntl;
+  childNestingDepth?: number;
   actionsDisabled?: boolean;
   actionsDisabledReason?: string;
 }
@@ -149,6 +150,7 @@ export const MemoTaskItem = memo(function TaskListItem({
   variant = "default",
   showPinAction = true,
   intl,
+  childNestingDepth = 0,
   actionsDisabled = false,
   actionsDisabledReason,
 }: TaskListItemProps) {
@@ -505,6 +507,12 @@ export const MemoTaskItem = memo(function TaskListItem({
       <Pin className="size-4" />
     </Button>
   );
+  const nestingRails =
+    childNestingDepth > 0
+      ? Array.from({ length: Math.min(childNestingDepth, 4) }).map((_, index) => (
+          <span key={index} className="mx-[3px] h-full w-px bg-border/70" />
+        ))
+      : null;
   // hover:none 只让右侧 task actions 常驻；如果也用它接管 leading 槽，
   // 触屏端的错误、未读和 loading 状态会被 Pin 永久替换。
   const shouldRenderPinAction =
@@ -554,6 +562,11 @@ export const MemoTaskItem = memo(function TaskListItem({
               视觉上像被两条边框夹住。这里改成“列表留白 + item 自己带圆角态”，
               让 hover/active 的层级由卡片背景承担，不再依赖分隔线。 */}
 
+      {nestingRails !== null ? (
+        <span aria-hidden="true" className="flex shrink-0 items-center self-stretch">
+          {nestingRails}
+        </span>
+      ) : null}
       <div
         className={cn(
           "relative flex size-4 shrink-0 items-center justify-center",

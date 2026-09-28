@@ -68,6 +68,8 @@ function GroupedTaskItemComponent({
   dragging,
   dragOverlay,
   tooltipsDisabled,
+  childDepth = 0,
+  childNestingDepth = 0,
 }: {
   task: ZCodeTaskMeta;
   groupId?: string;
@@ -89,10 +91,14 @@ function GroupedTaskItemComponent({
   dragging?: boolean;
   dragOverlay?: boolean;
   tooltipsDisabled?: boolean;
+  childDepth?: number;
+  childNestingDepth?: number;
 }) {
   return (
     <div className={cn("rounded-lg border border-transparent py-px")}>
       <GroupedTaskRow
+        childDepth={childDepth}
+        childNestingDepth={childNestingDepth ?? childDepth}
         task={task}
         currentGroupId={groupId}
         groups={groups}
