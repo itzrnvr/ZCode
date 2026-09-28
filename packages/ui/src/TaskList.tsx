@@ -11,9 +11,9 @@ import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { NewTaskButtonGroup } from "@/NewTaskButtonGroup.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
+import { buildSessionChildTree } from "@/lib/sessionChildTree.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
-import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { logger } from "@/logger.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -304,13 +304,29 @@ export const TaskList = memo(function TaskList({
     renameInputRef.current?.select();
   }, [renamingTaskId]);
 
-  const visibleSourceTasks = useMemo(() => {
+  const childDepthByTaskId = useMemo(() => {
     const orderedTasks =
       sortBy === "manual"
         ? tasks
         : [...tasks].sort((left, right) => compareZCodeTaskListItems(left, right, sortBy));
-    return orderedTasks;
+    // Fork rows keep their parent's position: only siblings sharing the same
+    // forkedFromTaskId edge are reordered into a child chain under it.
+    const depthByTaskId = new Map<string, number>();
+    const rows: ZCodeTaskMeta[] = [];
+    const walk = (nodes: ReturnType<typeof buildSessionChildTree>, depth: number) => {
+      for (const node of nodes) {
+        rows.push(node.task as ZCodeTaskMeta);
+        depthByTaskId.set(node.task.taskId, depth);
+        walk(node.children, depth + 1);
+      }
+    };
+    walk(buildSessionChildTree(orderedTasks), 0);
+    return { rows, depthByTaskId };
   }, [sortBy, tasks]);
+  const visibleSourceTasks = useMemo(
+    () => childDepthByTaskId.rows,
+    [childDepthByTaskId],
+  );
   useEffect(() => {
     if (!pendingArchiveTaskId) {
       return;
@@ -356,6 +372,7 @@ export const TaskList = memo(function TaskList({
     const isPinned = pinnedTaskIdSet.has(task.taskId);
     return (
       <MemoTaskItem
+        childNestingDepth={childDepthByTaskId.depthByTaskId.get(task.taskId) ?? 0}
         key={task.taskId}
         workspacePath={workspacePath}
         remoteSessionId={remoteSessionId}

@@ -62,6 +62,8 @@ function GroupedTaskRowComponent({
   dragging,
   dragOverlay,
   tooltipsDisabled,
+  childDepth = 0,
+  childNestingDepth = 0,
 }: {
   task: ZCodeTaskMeta;
   currentGroupId?: string;
@@ -83,6 +85,9 @@ function GroupedTaskRowComponent({
   dragging?: boolean;
   dragOverlay?: boolean;
   tooltipsDisabled?: boolean;
+  childDepth?: number;
+  /** fork/side-chat nesting depth: 0 is a top-level row, deeper levels draw left-edge rails. */
+  childNestingDepth?: number;
 }) {
   const { intl } = useZCodeIntl();
   const workspaceActionsDisabled = useOptionalTabStore((state) =>
@@ -175,6 +180,13 @@ function GroupedTaskRowComponent({
       )}
     >
       <span className={TASK_GROUP_ROW_LINE_CLASS}>
+        {(childNestingDepth ?? childDepth ?? 0) > 0 ? (
+          <span aria-hidden="true" className="flex shrink-0 items-center self-stretch">
+            {Array.from({ length: Math.min(childNestingDepth ?? childDepth ?? 0, 4) }).map((_, index) => (
+              <span key={index} className="mx-[3px] h-full w-px bg-border/70" />
+            ))}
+          </span>
+        ) : null}
         <TaskTitleOverflowText
           as="span"
           className="text-foreground"

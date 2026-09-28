@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ZCodeTaskMeta } from "@zcode/shared";
 import { GroupedTaskItem } from "@/workspace-grouped-tasks/task-item.js";
+import { buildSessionChildTree } from "@/lib/sessionChildTree.js";
 import { taskKey } from "@/workspace-grouped-tasks/ids.js";
 import {
   isPotentialVerticalScrollContainer,
@@ -81,10 +82,29 @@ export function VirtualizedGroupedTaskList({
   const listRef = useRef<HTMLDivElement | null>(null);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
-  const shouldVirtualize = shouldVirtualizeGroupedTasks(tasks.length);
+  // Fork/side-chat rows nest under their forkedFromTaskId parent while group order
+  // stays untouched: the tree only reorders siblings that share a parent edge.
+  const childTree = useMemo(
+    () => buildSessionChildTree(tasks),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks.map((task) => task.taskId).join("\0"), tasks.map((task) => task.forkedFromTaskId ?? "").join("\0")],
+  );
+  const flatRows = useMemo(() => {
+    const rows: Array<{ task: ZCodeTaskMeta; depth: number }> = [];
+    const walk = (nodes: ReturnType<typeof buildSessionChildTree>, depth: number) => {
+      for (const node of nodes) {
+        rows.push({ task: node.task as ZCodeTaskMeta, depth });
+        walk(node.children, depth + 1);
+      }
+    };
+    walk(childTree, 0);
+    return rows;
+  }, [childTree]);
+  const flatTasks = useMemo(() => flatRows.map((row) => row.task), [flatRows]);
+  const shouldVirtualize = shouldVirtualizeGroupedTasks(flatRows.length);
   const getItemKey = useCallback(
-    (index: number) => taskKey(tasks[index] ?? { workspacePath: "", taskId: String(index) }),
-    [tasks],
+    (index: number) => taskKey(flatTasks[index] ?? { workspacePath: "", taskId: String(index) }),
+    [flatTasks],
   );
 
   const updateScrollMargin = useCallback(() => {
@@ -129,10 +149,10 @@ export function VirtualizedGroupedTaskList({
       window.removeEventListener("resize", updateScrollMargin);
       resizeObserver?.disconnect();
     };
-  }, [groupId, shouldVirtualize, tasks.length, updateScrollMargin]);
+  }, [groupId, shouldVirtualize, flatRows.length, updateScrollMargin]);
 
   const rowVirtualizer = useVirtualizer({
-    count: shouldVirtualize ? tasks.length : 0,
+    count: shouldVirtualize ? flatRows.length : 0,
     getScrollElement: () => scrollElement,
     estimateSize: () => GROUPED_TASK_ROW_ESTIMATE_PX,
     getItemKey,
@@ -148,9 +168,15 @@ export function VirtualizedGroupedTaskList({
   const virtualRows = rowVirtualizer.getVirtualItems();
   const measureElement = rowVirtualizer.measureElement;
 
+  const depthByTaskId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const row of flatRows) map.set(row.task.taskId, row.depth);
+    return map;
+  }, [flatRows]);
   const renderTask = useCallback(
     (task: ZCodeTaskMeta) => (
       <GroupedTaskItem
+        childDepth={depthByTaskId.get(task.taskId) ?? 0}
         key={taskKey(task)}
         task={task}
         groupId={groupId}
@@ -197,7 +223,7 @@ export function VirtualizedGroupedTaskList({
   const renderedVirtualTasks = useMemo(
     () =>
       virtualRows.map((virtualRow) => {
-        const task = tasks[virtualRow.index];
+        const task = flatRows[virtualRow.index]?.task;
         if (!task) {
           return null;
         }
@@ -221,7 +247,7 @@ export function VirtualizedGroupedTaskList({
   );
 
   if (!shouldVirtualize) {
-    return <>{tasks.map((task) => renderTask(task))}</>;
+    return <>{flatRows.map((row) => renderTask(row.task))}</>;
   }
 
   return (
