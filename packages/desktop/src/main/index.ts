@@ -256,7 +256,12 @@ const localMediaPreviewPathRegistry = createLocalMediaPreviewPathRegistry();
 // 会和开发态已打开的 ZCode Dev 抢端口，导致 WebDriver session 创建前白屏超时。
 // 仅本地开发运行默认开启远程调试端口，并允许 e2e 通过环境变量交给 Chromedriver 接管。
 if (!app.isPackaged && process.env.ZCODE_DISABLE_FIXED_REMOTE_DEBUGGING_PORT !== "1") {
-  app.commandLine.appendSwitch("remote-debugging-port", "9229");
+  // Fork testing: allow the sandbox instance its own CDP port via
+  // ZCODE_REMOTE_DEBUGGING_PORT so automated probes never attach to the
+  // user's live window (both default to 9229). Falls back to 9229 untouched.
+  const forkDebugPortRaw = (process.env.ZCODE_REMOTE_DEBUGGING_PORT ?? "").trim();
+  const forkDebugPort = /^\d+$/.test(forkDebugPortRaw) ? forkDebugPortRaw : "9229";
+  app.commandLine.appendSwitch("remote-debugging-port", forkDebugPort);
 }
 
 app.setName(runtimeApplicationName);
