@@ -795,6 +795,16 @@ export function WorkspacePinnedTasksSection({
                   });
                 });
             }}
+            onMovePinnedItemUp={() => {
+              if (contextMenuItemKey) {
+                movePinnedItemUp(contextMenuItemKey);
+              }
+            }}
+            onMovePinnedItemDown={() => {
+              if (contextMenuItemKey) {
+                movePinnedItemDown(contextMenuItemKey);
+              }
+            }}
           />
         ) : null}
       </ContextMenu>
