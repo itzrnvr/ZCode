@@ -5,10 +5,23 @@ import {
   ZCODE_PLUGIN_ID_ENV_KEY,
 } from "@zcode/shared";
 import { registerMcpTools, traceContextToLogContext } from "../deps.js";
-import type { McpConnectionSnapshot, McpServerConfig, TraceContext } from "../deps.js";
+import type {
+  McpConnectionSnapshot,
+  McpServerConfig,
+  McpToolDescriptor,
+  TraceContext,
+} from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
 const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
+
+/**
+ * 首个 turn 等待 MCP 工具注册的上限。健康 server 通常 1s 内连上；死端点或卡住的
+ * OAuth 不该把 provider 请求拖到 session 级的 15s 预算。超时后按当前已连接的部分
+ * 先注册，其余 server settle 后再补注册；工具真正被调用时连接仍未就绪会由
+ * callTool 在调用点报错，而不是阻塞会话/轮次。
+ */
+const MCP_TOOL_REGISTRATION_WAIT_MS = 1_500;
 
 /**
  * 只有同时携带 resolver 注入的官方 plugin id 和本进程私有 authority 的 server 才能共享
@@ -119,50 +132,142 @@ export function startMcpStartup(
   return this.mcpStartupPromise;
 }
 
+/**
+ * 等到 promise settle，超时则回退到 fallback。
+ * 补充注册与提醒注入都走这条路径：这些信息是“锦上添花”，
+ * 任何上游卡住都不允许再把首个 provider 请求拖住。
+ */
+export function settleWithin<T>(
+  promise: Promise<T>,
+  fallback: T,
+  timeoutMs: number = MCP_TOOL_REGISTRATION_WAIT_MS,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    // 计时器必须保持 ref（默认状态）：unref 的计时器在事件循环空闲时不会触发，
+    // 单发 CLI 场景下这个“截止时间”会静默失效，首个轮次又会被上游拖住。
+    // 提前 settle 时清掉它，避免多留一个待触发的计时器。
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      resolve(fallback);
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function initializeMcp(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
 ): Promise<void> {
   if (this.mcpToolsRegistered) return;
+  // 先置位：等待只发生一次。未就绪的 server 在本函数返回后由其 settle 补注册，
+  // 后续 turn 不会再次进入这里等连接。
+  this.mcpToolsRegistered = true;
 
   const startup = this.startMcpStartup(traceContext);
   const mcpPort = this.mcpPort;
   if (!startup || !mcpPort) {
-    this.mcpToolsRegistered = true;
     return;
   }
   const serverCount = Object.keys(this.config.mcp?.servers ?? {}).length;
-
-  try {
-    const snapshot = await startup;
-    const registered = registerMcpTools(this.registry, mcpPort, snapshot.tools, {
-      allowedTools: this.config.toolAllowlist,
-      disallowedTools: this.config.toolDisallowlist,
-      officialCuaServerNames: computeOfficialCuaServerNames(
-        this.config.mcp?.servers ?? {},
-        new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
-      ),
-    });
-    if (registered.length > 0) {
-      this.invalidateToolCache();
+  const registerFromTools = (
+    tools: readonly McpToolDescriptor[],
+    source: "connected" | "deadline",
+  ): void => {
+    try {
+      const registered = registerMcpTools(this.registry, mcpPort, tools, {
+        allowedTools: this.config.toolAllowlist,
+        disallowedTools: this.config.toolDisallowlist,
+        officialCuaServerNames: computeOfficialCuaServerNames(
+          this.config.mcp?.servers ?? {},
+          new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
+        ),
+      });
+      if (registered.length > 0) {
+        this.invalidateToolCache();
+      }
+      this.logger?.info("MCP tools registered", {
+        ...traceContextToLogContext(traceContext),
+        event: "mcp.tools.registered",
+        module: "core.runtime",
+        registeredToolCount: registered.length,
+        serverCount,
+        source,
+        status: "completed",
+      });
+    } catch (error) {
+      this.logger?.warn("MCP tool registration failed", {
+        ...traceContextToLogContext(traceContext),
+        error: error instanceof Error ? error.message : String(error),
+        event: "mcp.tool_registration.failed",
+        module: "core.runtime",
+        source,
+        status: "failed",
+      });
     }
-    this.logger?.info("MCP tools registered", {
-      ...traceContextToLogContext(traceContext),
-      event: "mcp.tools.registered",
-      module: "core.runtime",
-      registeredToolCount: registered.length,
-      serverCount,
-      status: "completed",
-    });
-  } catch (error) {
-    this.mcpToolsRegistered = true;
-    this.logger?.warn("MCP initialization failed", {
-      ...traceContextToLogContext(traceContext),
-      error: error instanceof Error ? error.message : String(error),
-      event: "mcp.initialization.failed",
-      module: "core.runtime",
-      status: "failed",
-    });
+  };
+
+  let timedOut = false;
+  const settled = await settleWithin(
+    startup.then(
+      (snapshot) => snapshot,
+      (error: unknown) => {
+        this.logger?.warn("MCP initialization failed", {
+          ...traceContextToLogContext(traceContext),
+          error: error instanceof Error ? error.message : String(error),
+          event: "mcp.initialization.failed",
+          module: "core.runtime",
+          status: "failed",
+        });
+        return undefined;
+      },
+    ),
+    undefined,
+    MCP_TOOL_REGISTRATION_WAIT_MS,
+    () => {
+      timedOut = true;
+    },
+  );
+
+  if (!timedOut && settled) {
+    registerFromTools(settled.tools, "connected");
+    return;
   }
-  this.mcpToolsRegistered = true;
+  if (timedOut) {
+    // 部分注册：当前已连上的 server 的工具先进入工具表，其余等 startup settle 后补。
+    try {
+      // status()/listTools() 也是 RPC：上游卡住时它们同样会挂住，
+      // 因此这里给部分注册一个短上限，拿不到就当没有可用工具。
+      const tools = await settleWithin(
+        mcpPort
+          .listTools()
+          .then((result) => result ?? ([] as readonly McpToolDescriptor[]))
+          .catch(() => [] as readonly McpToolDescriptor[]),
+        [] as readonly McpToolDescriptor[],
+        MCP_TOOL_REGISTRATION_WAIT_MS,
+      );
+      registerFromTools(tools, "deadline");
+    } catch (error) {
+      this.logger?.warn("MCP partial tool registration failed", {
+        ...traceContextToLogContext(traceContext),
+        error: error instanceof Error ? error.message : String(error),
+        event: "mcp.tool_registration.partial_failed",
+        module: "core.runtime",
+        status: "failed",
+      });
+    }
+    void startup.then(
+      (snapshot) => registerFromTools(snapshot.tools, "connected"),
+      () => undefined,
+    );
+  }
 }
