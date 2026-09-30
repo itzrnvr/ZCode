@@ -1556,6 +1556,39 @@ export const zcodeSessionSubagentsResultSchema = z
   })
   .strict();
 export type ZCodeSessionSubagentsResult = z.infer<typeof zcodeSessionSubagentsResultSchema>;
+
+/**
+ * 框选副屏（`selection_side_chat`）子会话目录。左侧任务列表按 `TASK_LIST_SESSION_TYPES`
+ * 故意排除副屏（见 task-list-session-membership.ts），而副屏自身的"专用投影"从未实现，
+ * 结果副屏会话在 UI 里无处可见（issue #38）。这里补上那条投影：按 parentID 列出子会话，
+ * 并用 `isActive` 标出当前有活 runtime 记录的那些，让状态面板能直接显示活跃态。
+ */
+export const zcodeSessionSideChatsParamsSchema = z
+  .object({
+    sessionId: nonEmptyString,
+    limit: z.number().int().positive().max(50).default(20),
+  })
+  .strict();
+export type ZCodeSessionSideChatsParams = z.infer<typeof zcodeSessionSideChatsParamsSchema>;
+
+export const zcodeSessionSideChatSchema = z
+  .object({
+    sessionId: nonEmptyString,
+    title: z.string(),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    /** 该副屏当前有活 runtime 记录（已激活），不是"正在生成 token"。 */
+    isActive: z.boolean(),
+  })
+  .strict();
+export type ZCodeSessionSideChat = z.infer<typeof zcodeSessionSideChatSchema>;
+
+export const zcodeSessionSideChatsResultSchema = z
+  .object({
+    sideChats: z.array(zcodeSessionSideChatSchema),
+  })
+  .strict();
+export type ZCodeSessionSideChatsResult = z.infer<typeof zcodeSessionSideChatsResultSchema>;
 export const zcodeSessionCreateParamsSchema = z
   .object({
     sessionId: nonEmptyString.optional(),
@@ -3644,6 +3677,7 @@ export const zcodeProtocolMethods = {
   sessionResume: "session/resume",
   sessionList: "session/list",
   sessionSubagents: "session/subagents",
+  sessionSideChats: "session/sideChats",
   sessionRequestRuntimePreferences: "session/requestRuntimePreferences",
   sessionRead: "session/read",
   sessionMessages: "session/messages",

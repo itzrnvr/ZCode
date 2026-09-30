@@ -64,6 +64,7 @@ import { WORKSPACE_FILE_DRAG_MIME } from "@/lib/workspaceFileDrag.js";
 import { buildChatSessionScrollMemoryKey } from "@/lib/chatSessionScrollMemory.js";
 import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js";
 import { useServices } from "@/hooks/useServices.js";
+import { useSessionSideChats } from "@/hooks/useSessionSideChats.js";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import type { SessionOpenTrigger } from "@/lib/sessionOpenArmsTelemetry.js";
 import { useDynamicWorkflowAvailability } from "@/hooks/useDynamicWorkflowAvailability.js";
@@ -1715,6 +1716,19 @@ export function SessionPane({
       });
     },
     [onOpenSubagentSession, remoteSessionId, rootSessionId, workspaceIdentity, workspacePath],
+  );
+  const handleOpenSideChat = useCallback(
+    (request: { parentSessionId: string; childSessionId: string }) => {
+      if (!onOpenSelectionSideChat) return;
+      onOpenSelectionSideChat({
+        parentSessionId: request.parentSessionId,
+        childSessionId: request.childSessionId,
+        workspacePath,
+        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+        ...(remoteSessionId ? { remoteSessionId } : {}),
+      });
+    },
+    [onOpenSelectionSideChat, remoteSessionId, workspaceIdentity, workspacePath],
   );
   const handleOpenSubagentDirectory = useCallback(
     (request: import("@/lib/workspaceSidePane.js").OpenSubagentDirectorySideTabRequest) => {
@@ -3851,6 +3865,16 @@ export function SessionPane({
   // CLI V4 projection 是 running/count/manifest 的唯一权威；renderer 不再在 spawn
   // 事件后另发查询拼接第二份状态，避免并发 child 的 in-flight refresh 丢更新。
   const subagents = snapshot?.subagents ?? EMPTY_SUBAGENT_PROJECTION;
+  // 副屏目录是独立只读查询（不进 snapshot 契约）：它是这些会话在 UI 里唯一的入口，
+  // 但放进 snapshot 会让每次开合都多一次查询并改动冻结的 frame 形状。
+  const sideChats = useSessionSideChats({
+    sessionId,
+    workspacePath,
+    // 会话推进（新建/结束副屏）即刷新活跃态；不做常驻轮询。
+    refreshKey: snapshot?.seq ?? null,
+    ...(workspaceIdentity ? { workspaceIdentity } : {}),
+    ...(remoteSessionId ? { remoteSessionId } : {}),
+  });
   useEffect(() => {
     if (!sessionId || subagents.revision === 0 || !onSyncSubagentSessionTabs) return;
     onSyncSubagentSessionTabs({
@@ -3885,6 +3909,7 @@ export function SessionPane({
         backgroundWorks: snapshot?.backgroundWorks ?? [],
         runningSubagents: subagents.running,
         workflowRuns: snapshot?.workflowRuns?.runs ?? [],
+        sideChats: sideChats.sideChats,
       }),
     [
       isOfficeMode,
@@ -3897,6 +3922,7 @@ export function SessionPane({
       snapshot?.workflowRuns,
       state.sessionPlans,
       selectionSideChat,
+      sideChats.sideChats,
       subagents.running,
       workspacePath,
     ],
@@ -4737,6 +4763,7 @@ export function SessionPane({
             }
             onCancelBackgroundWork={readOnly ? undefined : handleCancelBackgroundWork}
             onOpenSubagentSession={onOpenSubagentSession ? handleOpenSubagentSession : undefined}
+            onOpenSideChat={handleOpenSideChat}
             onOpenSubagentDirectory={
               onOpenSubagentDirectory ? handleOpenSubagentDirectory : undefined
             }

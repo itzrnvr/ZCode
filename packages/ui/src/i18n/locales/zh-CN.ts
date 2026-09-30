@@ -4581,6 +4581,10 @@ const zhCN: Record<string, string> = {
   "chat.statusPanel.todoWaitingFold": "待处理 {count} 项",
   "chat.statusPanel.terminals": "终端",
   "chat.statusPanel.agents": "智能体",
+  "chat.statusPanel.sideChats": "副屏",
+  "chat.statusPanel.sideChatActive": "活跃",
+  "chat.statusPanel.sideChatsCount": "{count} 个副屏",
+  "chat.statusPanel.sideChatsActiveCount": "{count} 个活跃",
   // Workflows 分区：与 Terminals / Agents 并列的
   // 第三类实时活动。行内的状态词与步数复用 chat.toolCall.workflow.* 那一组，不另造词汇。
   "chat.statusPanel.workflows": "工作流",

@@ -64,6 +64,7 @@ import {
   zcodeSessionStopParamsSchema,
   zcodeSessionSubscribeParamsSchema,
   zcodeSessionSubagentsParamsSchema,
+  zcodeSessionSideChatsParamsSchema,
   zcodeTaskTokenUsageParamsSchema,
   zcodeUsageStatsParamsSchema,
   zcodeWorkspaceGenerateTextParamsSchema,
@@ -71,6 +72,7 @@ import {
   parseRemoteWorkspaceIdentity,
   type ZCodeAutomationBotDeliveryTarget,
   type ZCodeSessionCreateParams,
+  type ZCodeSessionSideChat,
   type ZCodeDeliveryKind,
   type IntegratedTerminalShellSelection,
   type ZCodeSessionRuntimePreferencesScope,
@@ -1770,6 +1772,65 @@ export async function listSessionSubagents(
       items: ended.items,
       ...(ended.nextCursor ? { nextCursor: ended.nextCursor } : {}),
     },
+  };
+}
+
+/**
+ * 框选副屏会话目录（issue #38）。
+ *
+ * 左侧任务列表按 `TASK_LIST_SESSION_TYPES` 故意排除 `selection_side_chat`，注释里说副屏
+ * "由各自专用投影承载"——但那条投影从未实现。实测：DB 里 7 个 `selection_side_chat` 会话，
+ * `tasks-index` 里 0 个，`listSessions` 也因 taskTypes 过滤而全部不可见，于是副屏在 UI 里
+ * 彻底无处可寻（含重启后"副屏消失"这一类现象：会话数据在，只是没有任何入口列出它）。
+ *
+ * 这里补上那条投影：按 `parent_id` 列子会话，并把仍在 runtime 里活着的那些标成 active。
+ * 纯只读查询，不激活 runtime、不产生任何写。
+ */
+export async function listSessionSideChats(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+) {
+  const params = parseParams(zcodeSessionSideChatsParamsSchema, rawParams ?? {});
+  const store = context.deps.sessionStore;
+  const parentSessionId = String(params.sessionId);
+
+  const persisted = store
+    ? await store.listSessions({
+        parentID: parentSessionId as SessionId,
+        taskTypes: ["selection_side_chat"],
+        limit: params.limit,
+      })
+    : [];
+
+  // 活记录里的副屏可能还没落盘（或刚落盘），两条来源都要收，否则"刚开的副屏"会闪一下再消失。
+  const byId = new Map<string, ZCodeSessionSideChat>();
+  for (const session of persisted) {
+    byId.set(String(session.id), {
+      sessionId: String(session.id),
+      title: session.title,
+      createdAt: session.time?.created ?? 0,
+      updatedAt: session.time?.updated ?? 0,
+      isActive: false,
+    });
+  }
+  for (const [sessionId, record] of context.sessions) {
+    if (record.persistence === "deferred") continue;
+    if (record.taskType !== "selection_side_chat") continue;
+    if (String(record.parentSessionId ?? "") !== parentSessionId) continue;
+    const existing = byId.get(sessionId);
+    byId.set(sessionId, {
+      sessionId,
+      title: existing?.title ?? "Selection side chat",
+      createdAt: existing?.createdAt ?? 0,
+      updatedAt: existing?.updatedAt ?? 0,
+      isActive: true,
+    });
+  }
+
+  return {
+    sideChats: [...byId.values()]
+      .sort((left, right) => right.updatedAt - left.updatedAt || right.createdAt - left.createdAt)
+      .slice(0, params.limit),
   };
 }
 

@@ -90,6 +90,7 @@ import { resolveConversationStatusPanelVariant } from "@/v4/conversationLayout.j
 import {
   buildConversationStatusPanelModel,
   type ConversationStatusPanelRunningSubagent,
+  type ConversationStatusPanelSideChat,
   type ConversationStatusPanelModel,
   type ConversationStatusPanelSessionPlanItem,
   type ConversationStatusPanelWorkflowRun,
@@ -146,6 +147,8 @@ interface ConversationStatusPanelProps {
   onCancelBackgroundWork?: (workId: string) => void;
   onOpenSubagentSession?: (request: OpenSubagentSideTabRequest) => void;
   onOpenSubagentDirectory?: (request: OpenSubagentDirectorySideTabRequest) => void;
+  /** 打开指定副屏（issue #38）：整行可点，reveal 侧边面板并聚焦该副屏。 */
+  onOpenSideChat?: (request: { parentSessionId: string; childSessionId: string }) => void;
   onOpenWorkflowRun?: (target: ConversationStatusPanelWorkflowRunTarget) => void;
   onOpenWorkflowRunDirectory?: (request: OpenWorkflowRunDirectorySideTabRequest) => void;
   className?: string;
@@ -232,7 +235,8 @@ type StatusSectionKind =
   | "plan"
   | "terminal"
   | "workflow"
-  | "agent";
+  | "agent"
+  | "sideChats";
 
 const STATUS_SECTION_SCROLL_POLICY = {
   environment: null,
@@ -244,6 +248,8 @@ const STATUS_SECTION_SCROLL_POLICY = {
   // workflow 行与 terminal / agent 行同高（两行 + 控制），限高沿用同一档。
   workflow: "max-h-48",
   agent: "max-h-48",
+  // 副屏行是单行标题 + 活跃点，比 agent 行矮一档。
+  sideChats: "max-h-48",
 } as const satisfies Record<StatusSectionKind, string | null>;
 
 function StatusSectionHeader({
@@ -1313,6 +1319,116 @@ function WorkflowStatusSection({
   );
 }
 
+/**
+ * 框选副屏目录区块（issue #38）。
+ *
+ * 副屏会话是 `selection_side_chat` 子会话，父会话就是当前会话。左侧任务列表按
+ * `TASK_LIST_SESSION_TYPES` 故意排除副屏，副屏自己又没有目录投影，于是这些会话在
+ * UI 里没有任何入口——包括重启后"副屏不见了"的现象：数据一直按 `parent_id` 关联着，
+ * 只是没人把它们列出来。这里就是那条入口：整行可点，点开对应副屏并 reveal 侧边面板。
+ */
+function SideChatStatusSection({
+  onOpenChange,
+  onOpenSideChat,
+  open,
+  parentSessionId,
+  separated,
+  sideChats,
+  title,
+}: {
+  onOpenChange?: (open: boolean) => void;
+  onOpenSideChat?: (request: { parentSessionId: string; childSessionId: string }) => void;
+  open?: boolean;
+  parentSessionId?: string;
+  separated: boolean;
+  sideChats: readonly ConversationStatusPanelSideChat[];
+  title: string;
+}) {
+  const { intl } = useZCodeIntl();
+  if (sideChats.length === 0) return null;
+  const activeCount = sideChats.filter((sideChat) => sideChat.isActive).length;
+
+  return (
+    <StatusSection
+      section="sideChats"
+      defaultOpen={false}
+      open={open}
+      onOpenChange={onOpenChange}
+      separated={separated}
+      title={title}
+      trailing={(isOpen) =>
+        isOpen ? null : (
+          <>
+            {activeCount > 0 ? (
+              <>
+                <span className="shrink-0">
+                  {intl.formatMessage(
+                    { id: "chat.statusPanel.sideChatsActiveCount" },
+                    { count: activeCount },
+                  )}
+                </span>
+                <span className="shrink-0">·</span>
+              </>
+            ) : null}
+            <span className="shrink-0">
+              {intl.formatMessage(
+                { id: "chat.statusPanel.sideChatsCount" },
+                { count: sideChats.length },
+              )}
+            </span>
+          </>
+        )
+      }
+    >
+      <ul className="space-y-0">
+        {sideChats.map((sideChat) => {
+          const canOpen = Boolean(parentSessionId && onOpenSideChat);
+          return (
+            <li key={sideChat.sessionId} className="min-w-0">
+              <button
+                type="button"
+                data-side-chat-trigger={sideChat.sessionId}
+                data-side-chat-active={sideChat.isActive ? "true" : "false"}
+                disabled={!canOpen}
+                onClick={() => {
+                  if (!canOpen || !parentSessionId) return;
+                  onOpenSideChat?.({
+                    parentSessionId,
+                    childSessionId: sideChat.sessionId,
+                  });
+                }}
+                className={cn(
+                  "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left",
+                  canOpen ? "cursor-pointer hover:bg-[var(--color-hover)]" : "cursor-default",
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  data-side-chat-active-dot={sideChat.isActive ? "true" : "false"}
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    sideChat.isActive
+                      ? "bg-[var(--color-success)]"
+                      : "bg-[var(--color-foreground-subtlest)]",
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate text-ui-sm text-[var(--color-foreground)]">
+                  {sideChat.title}
+                </span>
+                {sideChat.isActive ? (
+                  <span className="shrink-0 text-ui-xs text-[var(--color-foreground-subtle)]">
+                    {intl.formatMessage({ id: "chat.statusPanel.sideChatActive" })}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </StatusSection>
+  );
+}
+
 function SubagentStatusSection({
   endedSubagentCount,
   onCancelBackgroundWork,
@@ -1740,6 +1856,7 @@ function ConversationStatusPanelImpl({
   onCancelBackgroundWork,
   onOpenSubagentSession,
   onOpenSubagentDirectory,
+  onOpenSideChat,
   onOpenWorkflowRun,
   onOpenWorkflowRunDirectory,
   className,
@@ -1810,6 +1927,8 @@ function ConversationStatusPanelImpl({
   // 已结束目录入口过去渲染在 Agent StatusSection 之后，视觉和 DOM 都被提升成
   // 并列顶层 section。Agent 的运行态和已结束目录属于同一领域，统一由 Agent 折叠分组承载。
   const canRenderAgents = model.runningSubagentWorks.length > 0 || canRenderEndedAgents;
+  // 副屏目录只要有子会话就该露出来：它是这些会话在 UI 里唯一的入口（issue #38）。
+  const canRenderSideChats = model.sideChats.length > 0;
   const handlePanelModeChange = useCallback(
     (value: string) => {
       if (value === "auto") {
@@ -2052,6 +2171,23 @@ function ConversationStatusPanelImpl({
                 rootSessionId={rootSessionId}
                 onOpenSubagentSession={onOpenSubagentSession}
                 onOpenSubagentDirectory={onOpenSubagentDirectory}
+              />
+            ) : null}
+            {canRenderSideChats ? (
+              <SideChatStatusSection
+                title={intl.formatMessage({ id: "chat.statusPanel.sideChats" })}
+                sideChats={model.sideChats}
+                parentSessionId={parentSessionId}
+                onOpenSideChat={onOpenSideChat}
+                separated={
+                  canRenderGit ||
+                  canRenderGoal ||
+                  canRenderSessionPlans ||
+                  canRenderPlan ||
+                  canRenderTerminals ||
+                  canRenderWorkflows ||
+                  canRenderAgents
+                }
               />
             ) : null}
           </div>

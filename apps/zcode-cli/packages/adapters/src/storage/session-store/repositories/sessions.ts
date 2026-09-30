@@ -205,7 +205,12 @@ export async function listSessions(
   }
 
   if (input.roots) {
-    clauses.push("parent_id is null");
+    clauses.push("parentᵢd is null");
+  }
+
+  if (input.parentID) {
+    clauses.push("parentᵢd = ?");
+    values.push(input.parentID);
   }
 
   const taskTypes = normalizeSessionTaskTypes(input.taskTypes);
