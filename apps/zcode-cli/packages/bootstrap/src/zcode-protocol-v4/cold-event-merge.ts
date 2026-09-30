@@ -15,7 +15,7 @@ import {
   type HydratedGoalVerificationEntry,
 } from "./transcript-hydration.js";
 
-interface ConversationMaterializationSource {
+export interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
   messages: MessageWithParts[];

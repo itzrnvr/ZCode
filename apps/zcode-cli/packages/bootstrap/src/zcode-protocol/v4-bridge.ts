@@ -36,7 +36,15 @@ import {
 import {
   loadPersistedConversationMaterialization,
   mergeColdConversationEvents,
+  type ConversationMaterializationSource,
 } from "../zcode-protocol-v4/cold-event-merge.js";
+import {
+  coldHydrationCacheable,
+  coldHydrationFingerprint,
+  readColdHydrationCache,
+  writeColdHydrationCache,
+} from "../zcode-protocol-v4/cold-hydration-cache.js";
+import { goalVerificationEntriesFromSessionEntries } from "../zcode-protocol-v4/transcript-hydration.js";
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
@@ -127,6 +135,14 @@ function sessionUsageSeedFromRuntimeContextUsage(
       ...(contextUsage.breakdown ? { breakdown: contextUsage.breakdown } : {}),
     },
   };
+}
+
+/** 冷恢复缓存条目：形状由本文件拥有，缓存层只做键控存取。 */
+interface ColdHydrationCacheEntry {
+  events: SessionEvent[];
+  sharedContextImport?: ConversationMaterializationSource["sharedContextImport"];
+  synthesized: boolean;
+  usageSeed: SessionUsageSeed | null;
 }
 
 const STABLE_FORK_MODES = new Set<CollaborationMode>(["plan", "build", "edit", "yolo", "auto"]);
@@ -1796,6 +1812,61 @@ export function createConversationV4Gateway(
       const replayed = await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents);
       const events = replayed.length === 0 ? liveEvents : [...replayed, ...liveEvents];
       const store = context.deps.sessionStore;
+      // ── 冷恢复事件缓存（issue #4）────────────────────────────────────────────
+      // 实测 22 809 part 的会话：读 transcript 639ms + 合成 64ms + 折叠 33ms，而读进来的
+      // 66.5MB 里 98.8% 从未变成行。缓存**合成结果**（1.63MB）后命中路径只剩 8ms 解析 +
+      // 33ms 折叠；折叠照旧发生，所以 rowId 契约不变（实测 834 vs 834 逐字节一致）。
+      //
+      // 闸门只有一个：没有活事件。此时 buildColdFileChangeSummaries 一次 artifact 都不读
+      // （它遍历 workspaceCheckpoints(events)），readSessionContextUsage 的 live 用量那一路
+      // 也是空的，于是合成与 usageSeed 同时退化成 transcript 的纯函数——只有这两项都退化
+      // 才允许缓存。有活事件就整条绕过：宁可重读，也不能拿可能过期的摘要/用量冒充权威。
+      const coldCacheable = coldHydrationCacheable(events.length) && store !== undefined;
+      let coldCacheFingerprint: string | null = null;
+      if (coldCacheable && store) {
+        const [cachedSession, cachedTarget, cachedEntries] = await Promise.all([
+          store.getSession(sessionId as SessionId),
+          store.readTarget({ sessionID: sessionId as SessionId }),
+          store.sessionEntries
+            ? store.sessionEntries({ sessionID: sessionId as SessionId }).catch(() => [])
+            : Promise.resolve([]),
+        ]);
+        coldCacheFingerprint = coldHydrationFingerprint({
+          sessionId,
+          transcriptWatermark: cachedSession?.time.updated,
+          revert: cachedSession?.revert ?? null,
+          title: cachedSession?.title ?? null,
+          targetUpdatedAt: cachedTarget?.time.updated,
+          contextWindow: resolveSessionModelContextWindow(context, record),
+          goalVerificationEntries: goalVerificationEntriesFromSessionEntries(cachedEntries),
+        });
+        const hit = readColdHydrationCache<ColdHydrationCacheEntry>(
+          sessionId,
+          coldCacheFingerprint,
+        );
+        if (hit) {
+          // 命中只省掉 transcript 读取与合成；subagents 种子是独立查询，成本不变。
+          const cachedSubagents = await listSessionSubagents(
+            context,
+            { sessionId, endedLimit: 1 },
+            persistedMessages,
+          );
+          return {
+            events: hit.events,
+            usageSeed: hit.usageSeed,
+            synthesized: hit.synthesized,
+            subagentsSeed: {
+              revision: cachedSubagents.revision,
+              childSessionIds: cachedSubagents.childSessionIds,
+              running: cachedSubagents.running,
+            },
+            ...(hit.sharedContextImport
+              ? { sharedContextImport: hit.sharedContextImport }
+              : {}),
+            sourceEventSeq,
+          };
+        }
+      }
       const source = await loadPersistedConversationMaterialization({
         memoryEvents: events,
         persistedMessages,
@@ -1888,6 +1959,17 @@ export function createConversationV4Gateway(
         { sessionId, endedLimit: 1 },
         persistedMessages,
       );
+      // 只有纯冷路径（无活事件）才写缓存：此时合成与 usageSeed 都是 transcript 的纯函数。
+      if (coldCacheable && coldCacheFingerprint) {
+        writeColdHydrationCache<ColdHydrationCacheEntry>(sessionId, coldCacheFingerprint, {
+          events: merged.events,
+          synthesized: merged.usedDurableTranscript,
+          usageSeed,
+          ...(source.sharedContextImport
+            ? { sharedContextImport: source.sharedContextImport }
+            : {}),
+        });
+      }
       return {
         events: merged.events,
         // 与合成事件共用本次查询结果；不在后续回填阶段重新读取另一份容量。
