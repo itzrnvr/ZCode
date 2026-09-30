@@ -300,6 +300,11 @@ export interface ListSessionsInput {
   directory?: string;
   path?: string;
   roots?: boolean;
+  /**
+   * 只返回该父会话的子会话（如 `selection_side_chat`）。`roots` 与它互斥：
+   * 左侧任务列表按 roots 收主任务，副屏/子会话投影按 parentID 收 child。
+   */
+  parentID?: SessionId;
   taskTypes?: SessionTaskType[];
   includeArchived?: boolean;
   limit?: number;

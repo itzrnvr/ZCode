@@ -56,6 +56,7 @@ import type {
   ZCodeSessionRuntimePreferencesResult,
   ZCodeSessionStateSnapshot,
   ZCodeSessionSubagentsResult,
+  ZCodeSessionSideChatsResult,
   ZCodeStateUpdatedNotification,
   ZCodeTaskClientMode,
   ZCodeBrowserAmbientContext,
@@ -217,6 +218,13 @@ export interface ZCodeAgentListSessionsParams extends ZCodeAgentWorkspaceTarget 
 export interface ZCodeAgentListSessionSubagentsParams extends ZCodeAgentSessionTarget {
   endedCursor?: string;
   endedLimit?: number;
+  /** 远程 workspace 的宿主连接身份；只用于选择现有 Host，不进入 CLI wire query。 */
+  remoteSessionId?: string;
+}
+
+/** 框选副屏目录查询；只读，不激活 runtime（issue #38）。 */
+export interface ZCodeAgentListSessionSideChatsParams extends ZCodeAgentSessionTarget {
+  limit?: number;
   /** 远程 workspace 的宿主连接身份；只用于选择现有 Host，不进入 CLI wire query。 */
   remoteSessionId?: string;
 }
@@ -596,6 +604,10 @@ export interface IZCodeAgentService {
   listSessionSubagents(
     params: ZCodeAgentListSessionSubagentsParams,
   ): Promise<ZCodeSessionSubagentsResult>;
+  /** 副屏（selection_side_chat）目录：左侧任务列表按 taskType 排除副屏，这里是它唯一的入口。 */
+  listSessionSideChats(
+    params: ZCodeAgentListSessionSideChatsParams,
+  ): Promise<ZCodeSessionSideChatsResult>;
   getAppUsageStats(params: ZCodeAgentAppUsageParams): Promise<AppUsageSnapshot>;
   getTaskTokenUsage(params: ZCodeAgentTaskTokenUsageParams): Promise<ZCodeTaskTokenUsageResult>;
   readSession(params: ZCodeAgentReadSessionParams): Promise<ZCodeSessionStateSnapshot>;

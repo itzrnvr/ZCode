@@ -35,6 +35,7 @@ import {
   getUsageStats,
   listSessions,
   listSessionSubagents,
+  listSessionSideChats,
   readEvents,
   readMessages,
   readSession,
@@ -575,6 +576,8 @@ export class ZCodeProtocolAgentServer {
         return await listSessions(this.context, request.params);
       case zcodeProtocolMethods.sessionSubagents:
         return await listSessionSubagents(this.context, request.params);
+      case zcodeProtocolMethods.sessionSideChats:
+        return await listSessionSideChats(this.context, request.params);
       case zcodeProtocolMethods.sessionRead:
         return await readSession(this.context, request.params);
       case zcodeProtocolMethods.sessionMessages:

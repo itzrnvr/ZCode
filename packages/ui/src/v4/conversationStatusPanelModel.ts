@@ -1,4 +1,4 @@
-import type { GitRepositorySummary } from "@zcode/shared";
+import type { GitRepositorySummary, ZCodeSessionSideChat } from "@zcode/shared";
 import type {
   BackgroundWorkSummary,
   GoalState,
@@ -106,6 +106,13 @@ export function workflowRunOpenTarget(
   };
 }
 
+export interface ConversationStatusPanelSideChat {
+  sessionId: string;
+  title: string;
+  updatedAt: number;
+  isActive: boolean;
+}
+
 export interface ConversationStatusPanelModel {
   hasContent: boolean;
   git: ConversationStatusPanelGitModel | null;
@@ -115,6 +122,12 @@ export interface ConversationStatusPanelModel {
   runningBashWorks: BackgroundWorkSummary[];
   runningSubagentWorks: ConversationStatusPanelRunningSubagent[];
   runningWorkflowRuns: ConversationStatusPanelWorkflowRun[];
+  /**
+   * 框选副屏目录（issue #38）。左侧任务列表按 `TASK_LIST_SESSION_TYPES` 排除副屏，
+   * 副屏自己的"专用投影"此前没实现，于是这些会话在 UI 里没有任何入口——包括重启后
+   * 看起来"消失"的情况：数据在，只是列不出来。isActive 表示该副屏当前有活 runtime 记录。
+   */
+  sideChats: ConversationStatusPanelSideChat[];
 }
 
 interface BuildConversationStatusPanelModelInput {
@@ -129,6 +142,8 @@ interface BuildConversationStatusPanelModelInput {
   backgroundWorks?: readonly BackgroundWorkSummary[];
   runningSubagents?: readonly RunningSubagentSummary[];
   workflowRuns?: readonly WorkflowRunState[];
+  /** 副屏目录，来自 session/sideChats（issue #38）。 */
+  sideChats?: readonly ZCodeSessionSideChat[];
 }
 
 function buildGitModel({
@@ -364,6 +379,19 @@ export function buildConversationStatusPanelModel(
 
   const runningWorkflowRuns = buildRunningWorkflowRuns(input.workflowRuns, workflowWorkByWorkId);
 
+  // 活跃副屏排前面：它才是需要一眼看到的那一个，其余按最近活动排。
+  const sideChats: ConversationStatusPanelSideChat[] = [...(input.sideChats ?? [])]
+    .map((sideChat) => ({
+      sessionId: sideChat.sessionId,
+      title: sideChat.title,
+      updatedAt: sideChat.updatedAt,
+      isActive: sideChat.isActive,
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.isActive) - Number(left.isActive) || right.updatedAt - left.updatedAt,
+    );
+
   return {
     git,
     goal,
@@ -372,6 +400,7 @@ export function buildConversationStatusPanelModel(
     runningBashWorks,
     runningSubagentWorks,
     runningWorkflowRuns,
+    sideChats,
     hasContent: Boolean(
       git ||
       goal ||
@@ -379,7 +408,8 @@ export function buildConversationStatusPanelModel(
       plan ||
       runningBashWorks.length > 0 ||
       runningSubagentWorks.length > 0 ||
-      runningWorkflowRuns.length > 0,
+      runningWorkflowRuns.length > 0 ||
+      sideChats.length > 0,
     ),
   };
 }
