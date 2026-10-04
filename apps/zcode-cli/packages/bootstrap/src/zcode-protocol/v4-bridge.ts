@@ -36,15 +36,14 @@ import {
 import {
   loadPersistedConversationMaterialization,
   mergeColdConversationEvents,
-  type ConversationMaterializationSource,
 } from "../zcode-protocol-v4/cold-event-merge.js";
+import { writeColdHydrationCache } from "../zcode-protocol-v4/cold-hydration-cache.js";
 import {
-  coldHydrationCacheable,
-  coldHydrationFingerprint,
-  readColdHydrationCache,
-  writeColdHydrationCache,
-} from "../zcode-protocol-v4/cold-hydration-cache.js";
-import { goalVerificationEntriesFromSessionEntries } from "../zcode-protocol-v4/transcript-hydration.js";
+  COLD_HYDRATION_CACHE_LOG,
+  isColdHydrationCacheFingerprintCurrent,
+  planColdHydrationCache,
+  type ColdHydrationCachePayload,
+} from "../zcode-protocol-v4/cold-hydration-cache-plan.js";
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
@@ -137,12 +136,29 @@ function sessionUsageSeedFromRuntimeContextUsage(
   };
 }
 
-/** 冷恢复缓存条目：形状由本文件拥有，缓存层只做键控存取。 */
-interface ColdHydrationCacheEntry {
-  events: SessionEvent[];
-  sharedContextImport?: ConversationMaterializationSource["sharedContextImport"];
-  synthesized: boolean;
-  usageSeed: SessionUsageSeed | null;
+/**
+ * 冷缓存三态标记：info 级（生产 minLevel=Info，debug 只在 development 落盘；见
+ * adapters/logging/index.ts:226-228）。三个 event 名是稳定 ASCII 契约，沙箱验收就是 grep 它们；
+ * 只带 sessionId/phase/reason/liveEventTypes，绝不带载荷或 transcript 内容。
+ */
+function logColdHydrationCache(
+  context: ZCodeProtocolAgentServerContext,
+  sessionId: string,
+  fields: {
+    event: string;
+    liveEventTypes?: readonly string[];
+    message: string;
+    reason?: string;
+  },
+): void {
+  context.logger?.info(fields.message, {
+    ...(fields.liveEventTypes ? { liveEventTypes: fields.liveEventTypes } : {}),
+    ...(fields.reason ? { reason: fields.reason } : {}),
+    event: fields.event,
+    module: "bootstrap.zcode_protocol",
+    phase: "loadPersistedEvents",
+    sessionId,
+  });
 }
 
 const STABLE_FORK_MODES = new Set<CollaborationMode>(["plan", "build", "edit", "yolo", "auto"]);
@@ -1817,55 +1833,54 @@ export function createConversationV4Gateway(
       // 66.5MB 里 98.8% 从未变成行。缓存**合成结果**（1.63MB）后命中路径只剩 8ms 解析 +
       // 33ms 折叠；折叠照旧发生，所以 rowId 契约不变（实测 834 vs 834 逐字节一致）。
       //
-      // 闸门只有一个：没有活事件。此时 buildColdFileChangeSummaries 一次 artifact 都不读
-      // （它遍历 workspaceCheckpoints(events)），readSessionContextUsage 的 live 用量那一路
-      // 也是空的，于是合成与 usageSeed 同时退化成 transcript 的纯函数——只有这两项都退化
-      // 才允许缓存。有活事件就整条绕过：宁可重读，也不能拿可能过期的摘要/用量冒充权威。
-      const coldCacheable = coldHydrationCacheable(events.length) && store !== undefined;
-      let coldCacheFingerprint: string | null = null;
-      if (coldCacheable && store) {
-        const [cachedSession, cachedTarget, cachedEntries] = await Promise.all([
-          store.getSession(sessionId as SessionId),
-          store.readTarget({ sessionID: sessionId as SessionId }),
-          store.sessionEntries
-            ? store.sessionEntries({ sessionID: sessionId as SessionId }).catch(() => [])
-            : Promise.resolve([]),
-        ]);
-        coldCacheFingerprint = coldHydrationFingerprint({
-          sessionId,
-          transcriptWatermark: cachedSession?.time.updated,
-          revert: cachedSession?.revert ?? null,
-          title: cachedSession?.title ?? null,
-          targetUpdatedAt: cachedTarget?.time.updated,
-          contextWindow: resolveSessionModelContextWindow(context, record),
-          goalVerificationEntries: goalVerificationEntriesFromSessionEntries(cachedEntries),
+      // 门槛（#42 修正）：活事件只允许是 **resume 每次重新追加的生命周期事件**。冷开必然先
+      // resume，而 resumeFromStore 会把 SessionResumed（core/runtime/methods/resume.ts:253）
+      // 与带标题时的 SessionTitleUpdated（:352）写进同一个内存 event store，hydration 随后才
+      // 读到它们（沙箱日志里冷开 sourceEventSeq=2 就是这两条）——所以 #42 的"活事件数为 0"
+      // 门槛在真实冷开上永远判否，缓存从未被读写过一次。这类事件只走合并的尾部补充，命中时
+      // 由 finalizeColdConversationEvents 用当前这一份现贴，因此"命中 = 未命中"。
+      // 其余任何活事件（turn/hook/boundary/RewindTriggered/workflow 重放）一律整条绕过。
+      // 判定与指纹在 cold-hydration-cache-plan.ts，可被真实 resume→hydrate 顺序驱动测试。
+      const contextWindow = resolveSessionModelContextWindow(context, record);
+      const cachePlan = await planColdHydrationCache({
+        contextWindow,
+        events,
+        sessionId,
+        store,
+      });
+      if (cachePlan.kind === "hit") {
+        logColdHydrationCache(context, sessionId, {
+          event: COLD_HYDRATION_CACHE_LOG.hit.event,
+          message: COLD_HYDRATION_CACHE_LOG.hit.message,
         });
-        const hit = readColdHydrationCache<ColdHydrationCacheEntry>(
-          sessionId,
-          coldCacheFingerprint,
+        // 命中只省掉 transcript 读取与合成；subagents 种子是独立查询，成本不变。
+        const cachedSubagents = await listSessionSubagents(
+          context,
+          { sessionId, endedLimit: 1 },
+          persistedMessages,
         );
-        if (hit) {
-          // 命中只省掉 transcript 读取与合成；subagents 种子是独立查询，成本不变。
-          const cachedSubagents = await listSessionSubagents(
-            context,
-            { sessionId, endedLimit: 1 },
-            persistedMessages,
-          );
-          return {
-            events: hit.events,
-            usageSeed: hit.usageSeed,
-            synthesized: hit.synthesized,
-            subagentsSeed: {
-              revision: cachedSubagents.revision,
-              childSessionIds: cachedSubagents.childSessionIds,
-              running: cachedSubagents.running,
-            },
-            ...(hit.sharedContextImport
-              ? { sharedContextImport: hit.sharedContextImport }
-              : {}),
-            sourceEventSeq,
-          };
-        }
+        return {
+          events: cachePlan.events,
+          usageSeed: cachePlan.payload.usageSeed,
+          synthesized: cachePlan.payload.synthesized,
+          subagentsSeed: {
+            revision: cachedSubagents.revision,
+            childSessionIds: cachedSubagents.childSessionIds,
+            running: cachedSubagents.running,
+          },
+          ...(cachePlan.payload.sharedContextImport
+            ? { sharedContextImport: cachePlan.payload.sharedContextImport }
+            : {}),
+          sourceEventSeq,
+        };
+      }
+      if (cachePlan.kind === "bypass") {
+        logColdHydrationCache(context, sessionId, {
+          event: COLD_HYDRATION_CACHE_LOG.bypassed.event,
+          message: COLD_HYDRATION_CACHE_LOG.bypassed.message,
+          reason: cachePlan.reason,
+          ...(cachePlan.liveEventTypes ? { liveEventTypes: cachePlan.liveEventTypes } : {}),
+        });
       }
       const source = await loadPersistedConversationMaterialization({
         memoryEvents: events,
@@ -1918,7 +1933,7 @@ export function createConversationV4Gateway(
       });
       // 冷恢复 transcript 不保存模型能力，旧 hydration 自行填 20 万；
       // provider registry 已在 resume 前同步完成，应按恢复/退避后的当前模型精确取值。
-      const contextWindow = resolveSessionModelContextWindow(context, record);
+      // 与指纹同值：上面那次判定已经用它算过键，这里不能第二次解析出别的窗口。
       const usageSeed = sessionUsageSeedFromRuntimeContextUsage(
         await readSessionContextUsage(context, sessionId, source.messages),
         contextWindow,
@@ -1959,16 +1974,40 @@ export function createConversationV4Gateway(
         { sessionId, endedLimit: 1 },
         persistedMessages,
       );
-      // 只有纯冷路径（无活事件）才写缓存：此时合成与 usageSeed 都是 transcript 的纯函数。
-      if (coldCacheable && coldCacheFingerprint) {
-        writeColdHydrationCache<ColdHydrationCacheEntry>(sessionId, coldCacheFingerprint, {
-          events: merged.events,
-          synthesized: merged.usedDurableTranscript,
-          usageSeed,
-          ...(source.sharedContextImport
-            ? { sharedContextImport: source.sharedContextImport }
-            : {}),
-        });
+      // 只有判定为 miss 的冷路径才写缓存：存的是 transcript 合成结果（durableEvents），
+      // 不含 resume 生命周期事件——它们每次冷开都会重新追加，写进载荷第二次开就错。
+      // 写前复核指纹（seqlock）：合成期间输入被并发写入改变时不写，宁可这次不缓存。
+      if (cachePlan.kind === "miss") {
+        const planInput = { contextWindow, events, sessionId, store };
+        if (
+          await isColdHydrationCacheFingerprintCurrent({
+            ...planInput,
+            fingerprint: cachePlan.fingerprint,
+          })
+        ) {
+          writeColdHydrationCache<ColdHydrationCachePayload>(
+            sessionId,
+            cachePlan.fingerprint,
+            {
+              durableEvents: merged.durableEvents,
+              synthesized: merged.usedDurableTranscript,
+              usageSeed,
+              ...(source.sharedContextImport
+                ? { sharedContextImport: source.sharedContextImport }
+                : {}),
+            },
+          );
+          logColdHydrationCache(context, sessionId, {
+            event: COLD_HYDRATION_CACHE_LOG.missWritten.event,
+            message: COLD_HYDRATION_CACHE_LOG.missWritten.message,
+          });
+        } else {
+          logColdHydrationCache(context, sessionId, {
+            event: COLD_HYDRATION_CACHE_LOG.bypassed.event,
+            message: COLD_HYDRATION_CACHE_LOG.bypassed.message,
+            reason: "inputs-changed",
+          });
+        }
       }
       return {
         events: merged.events,

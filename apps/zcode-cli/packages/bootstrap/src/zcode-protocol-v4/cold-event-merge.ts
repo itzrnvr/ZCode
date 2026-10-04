@@ -15,6 +15,12 @@ import {
   type HydratedGoalVerificationEntry,
 } from "./transcript-hydration.js";
 
+/**
+ * `v4/shared_context_import` session entry 的类型名。导出是为了让冷缓存指纹取出同一条
+ * entry（entry 不推进水位，指纹必须显式盖住它）。
+ */
+export const SHARED_CONTEXT_IMPORT_ENTRY_TYPE = "v4/shared_context_import";
+
 export interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
@@ -96,7 +102,7 @@ export async function loadPersistedConversationMaterialization(input: {
       message.info.semantics?.origin === "import" &&
       message.info.semantics?.kind === "shared_context",
   );
-  const sharedContextEntry = entries.find((entry) => entry.type === "v4/shared_context_import");
+  const sharedContextEntry = entries.find((entry) => entry.type === SHARED_CONTEXT_IMPORT_ENTRY_TYPE);
   const sharedContextData =
     sharedContextEntry?.data && typeof sharedContextEntry.data === "object"
       ? (sharedContextEntry.data as Record<string, unknown>)
@@ -142,6 +148,12 @@ interface ColdEventMergeDiagnostic {
 
 export interface ColdEventMergeResult {
   diagnostics: ColdEventMergeDiagnostic[];
+  /**
+   * transcript 合成结果（`synthesizeEventsFromMessages` + 持久 target 注入的 TargetChanged），
+   * 未做序列号重排、不含 live overlay。冷缓存存它就是存"合成结果"；命中路径用
+   * `finalizeColdConversationEvents` 把当前 live 事件贴回来。
+   */
+  durableEvents: SessionEvent[];
   events: SessionEvent[];
   usedDurableTranscript: boolean;
 }
@@ -722,6 +734,34 @@ function resequence(events: readonly SessionEvent[]): SessionEvent[] {
   return events.map((event, index) => ({ ...event, sequenceNumber: index + 1 }));
 }
 
+const EMPTY_EVENTS_BY_TURN: ReadonlyMap<string, readonly SessionEvent[]> = new Map();
+
+/**
+ * 合并的收尾（序列号重排也在这里），**命中路径复用同一段**：缓存只存 transcript 合成结果
+ * （`durableEvents`），命中时把当前 live 事件当 trailing overlay 现贴。两条路径共用本函数，
+ * 所以"命中 = 未命中"是构造出来的，而不是靠两处实现各自小心的结果（含 sequenceNumber 与
+ * 尾部 bookkeeping）。
+ *
+ * 只有活事件全是 resume 生命周期时才允许命中；那些事件永远落 trailing（cold-event-merge.ts:881），
+ * 不会出现在 prefix/tail 里，所以命中路径可以不传那两个映射。传入非空映射前先证明该事件
+ * 类型能被尾部复原。
+ */
+export function finalizeColdConversationEvents(input: {
+  durableEvents: readonly SessionEvent[];
+  trailingEvents: readonly SessionEvent[];
+  turnPrefixEvents?: ReadonlyMap<string, readonly SessionEvent[]>;
+  turnTailEvents?: ReadonlyMap<string, readonly SessionEvent[]>;
+}): SessionEvent[] {
+  return resequence(
+    insertAtDurableTurnBoundaries({
+      durableEvents: input.durableEvents,
+      trailingEvents: input.trailingEvents,
+      turnPrefixEvents: input.turnPrefixEvents ?? EMPTY_EVENTS_BY_TURN,
+      turnTailEvents: input.turnTailEvents ?? EMPTY_EVENTS_BY_TURN,
+    }),
+  );
+}
+
 /**
  * 冷恢复三源合并：message/part 是已完成正文权威；session_entry 只补 legacy goal；
  * 内存事件只补未完成 turn 与没有 transcript 形态的当前状态。
@@ -900,14 +940,14 @@ export function mergeColdConversationEvents(input: MergeInput): ColdEventMergeRe
 
   return {
     diagnostics: [...diagnostics.values()],
-    events: resequence(
-      insertAtDurableTurnBoundaries({
-        durableEvents,
-        trailingEvents: supplements,
-        turnPrefixEvents: prefixEventsByTurnId,
-        turnTailEvents: boundaryEventsByTurnId,
-      }),
-    ),
+    // transcript 合成结果（含 target 注入事件），未重排、不含 live overlay：缓存写出的就是它。
+    durableEvents,
+    events: finalizeColdConversationEvents({
+      durableEvents,
+      trailingEvents: supplements,
+      turnPrefixEvents: prefixEventsByTurnId,
+      turnTailEvents: boundaryEventsByTurnId,
+    }),
     usedDurableTranscript:
       durableMessages.length > 0 || durableGoalEntries.length > 0 || hasPersistedTargetAuthority,
   };
