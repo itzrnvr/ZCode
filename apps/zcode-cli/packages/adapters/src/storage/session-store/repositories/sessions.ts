@@ -205,11 +205,11 @@ export async function listSessions(
   }
 
   if (input.roots) {
-    clauses.push("parentᵢd is null");
+    clauses.push("parent_id is null");
   }
 
   if (input.parentID) {
-    clauses.push("parentᵢd = ?");
+    clauses.push("parent_id = ?");
     values.push(input.parentID);
   }
 

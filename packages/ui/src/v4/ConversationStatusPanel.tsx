@@ -45,6 +45,7 @@ import type {
   GitChangeSourceId,
   GitRepositorySummary,
   ZCodeSessionRunningSubagent,
+  ZCodeSessionSideChat,
   ZCodeTaskChangeSummary,
 } from "@zcode/shared";
 import type {
@@ -118,6 +119,12 @@ interface ConversationStatusPanelProps {
   /** 本会话 `snapshot.workflowRuns.runs`；与 backgroundWorks 在模型层按 workId ≡ runId 联接。 */
   workflowRuns?: readonly WorkflowRunState[];
   /**
+   * 副屏目录（issue #38）。父会话侧一直只有 `onOpenSideChat` 回调，没有数据入口，
+   * 于是面板自建模型时 `sideChats` 恒为 []：区块被 `canRenderSideChats` 挡掉，
+   * 而"只有副屏"的会话连 `hasContent` 都是 false，整个面板直接返回 null。
+   */
+  sideChats?: readonly ZCodeSessionSideChat[];
+  /**
    * 已结束的 workflow run 条数（journal 口径，`countEndedWorkflowRuns`）。
    * 面板不自己算：它手上的投影是 memory-only 的活状态，重启后为空，而这条计数恰恰要在重启后
    * 仍然正确。
@@ -158,6 +165,7 @@ interface ConversationStatusPanelProps {
 const EMPTY_BACKGROUND_WORKS: readonly BackgroundWorkSummary[] = [];
 const EMPTY_RUNNING_SUBAGENTS: readonly ZCodeSessionRunningSubagent[] = [];
 const EMPTY_WORKFLOW_RUNS: readonly WorkflowRunState[] = [];
+const EMPTY_SIDE_CHATS: readonly ZCodeSessionSideChat[] = [];
 
 function formatDurationUnits(
   totalSeconds: number,
@@ -1833,6 +1841,7 @@ function ConversationStatusPanelImpl({
   backgroundWorks = EMPTY_BACKGROUND_WORKS,
   runningSubagents = EMPTY_RUNNING_SUBAGENTS,
   workflowRuns = EMPTY_WORKFLOW_RUNS,
+  sideChats = EMPTY_SIDE_CHATS,
   endedWorkflowRunCount = 0,
   endedSubagentCount = 0,
   rootSessionId,
@@ -1878,6 +1887,7 @@ function ConversationStatusPanelImpl({
         backgroundWorks,
         runningSubagents,
         workflowRuns,
+        sideChats,
       }),
     [
       isOfficeMode,
@@ -1889,6 +1899,7 @@ function ConversationStatusPanelImpl({
       sessionPlans,
       plan,
       runningSubagents,
+      sideChats,
       workflowRuns,
       workspacePath,
     ],

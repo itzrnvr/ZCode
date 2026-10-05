@@ -4722,6 +4722,7 @@ export function SessionPane({
             backgroundWorks={snapshot?.backgroundWorks ?? []}
             runningSubagents={subagents.running}
             workflowRuns={snapshot?.workflowRuns?.runs ?? []}
+            sideChats={sideChats.sideChats}
             endedSubagentCount={subagents.endedTotal}
             rootSessionId={rootSessionId ?? sessionId ?? undefined}
             parentSessionId={sessionId ?? undefined}
