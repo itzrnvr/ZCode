@@ -339,6 +339,11 @@ export const V4_METHODS = {
   conversationUnsubscribe: "v4/conversation/unsubscribe",
   // 行分页 query（rows/range）：只读、无状态、超时重发安全。
   conversationRowsRange: "v4/conversation/rowsRange",
+  // 投影快路径（0024 三张表）：只读 SQLite，不激活 runtime、不读 transcript、不产生 agent 往返。
+  // 与 rowsRange 同族但语义不同——rowsRange 的数据源是活投影（冷会话要先 app.resume()，
+  // 实测 4663ms 的运行时构造会重新回到点击路径），这条的数据源是写入时增量物化下来的行。
+  // 取不到（缺表/在建/过期/分支不可由有界尾部判定）一律 ok:false，客户端退回 rowsRange。
+  conversationRows: "v4/conversation/rows",
   // 当前有效分支的终态 ExitPlanMode 目录；只读、无状态、超时重发安全。
   conversationPlans: "v4/conversation/plans",
   conversationFileChanges: "v4/conversation/fileChanges",
@@ -529,6 +534,60 @@ export const v4ConversationRowsRangeResultSchema = z.object({
   hasMore: z.boolean(),
 });
 export type V4ConversationRowsRangeResult = z.infer<typeof v4ConversationRowsRangeResultSchema>;
+
+// ── conversation rows（投影快路径，只读 SQLite）──
+// 全序同 rowsRange：rowId 升序；缺省取尾部一页。刻意非 strict——与 rowsRange 一致，
+// 让新旧 host/client 的版本偏斜通过而不是抛错（strict 的那批 result schema 必须与 handler
+// 同步改，这条不需要）。
+export const v4ConversationRowsParamsSchema = z.object({
+  sessionId: z.string(),
+  /** Host attachment injects this trusted value; renderer callers omit it. */
+  clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]).optional(),
+  // 只接受「至少这么新」的投影；不满足回 stale 而不是回旧行。逐字比较，不可解析、不可排序。
+  minRevision: z.string().optional(),
+  // 取 rowId < beforeRowId 的行；缺省 = 从当前尾部向前。
+  beforeRowId: z.number().optional(),
+  // 缺省 = snapshotTailWindowRows（60）：与下发快照同一个行集，交换时视觉上是 no-op 而不是回流。
+  // 上限沿用 rowsRangeMaxLimit，不新增常量。
+  limit: z.number().min(1).max(PROTOCOL_V4_LIMITS.rowsRangeMaxLimit).optional(),
+});
+export type V4ConversationRowsParams = z.infer<typeof v4ConversationRowsParamsSchema>;
+
+/**
+ * 快路径读不到行的原因，闭集。客户端两类处理：
+ * 重试 = building（无 meta 行，后台折叠已 kick）/ stale（revision 不匹配或 minRevision 未满足）；
+ * 退回 rowsRange = missing（无此 session 行）/ partial（schema_version 不匹配或 payload 校验失败）
+ * / unsupported（revert/fork 分支不可由有界尾部判定）/ unavailable（宿主无 sessionStore 或其形状
+ * 不带 0024 成员）。注意「旧宿主没实现该方法」不走这里——ProxyChannel 对任意方法名都会发起调用，
+ * 于是它表现为 RPC 拒绝（CLI default 分支 -32601），由客户端归入同一个退回桶。
+ */
+export const V4_CONVERSATION_ROWS_UNAVAILABLE_REASONS = [
+  "missing",
+  "building",
+  "stale",
+  "partial",
+  "unsupported",
+  "unavailable",
+] as const;
+
+export const v4ConversationRowsResultSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    // 三段 = session.time_updated : conv_projection_watermark.seq : schema_version。
+    // 只用于 !== 比较与回传 minRevision；不是 atRevision，也绝不能拿来给 fileChanges 之类
+    // 只读查询当基准 —— 快路径没有事件水位，也不伪造。
+    revision: z.string(),
+    // rowId 升序；元素与 rowsRange 用的是同一个 conversationRowSchema，不另立行格式。
+    rows: z.array(conversationRowSchema),
+    // beforeRowId 方向是否还有更早的行。
+    hasMore: z.boolean(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    reason: z.enum(V4_CONVERSATION_ROWS_UNAVAILABLE_REASONS),
+  }),
+]);
+export type V4ConversationRowsResult = z.infer<typeof v4ConversationRowsResultSchema>;
 
 // ── conversation plans directory ──
 // 目录来自 CLI 完整有效 projection，不能用 renderer 的有界 tail window 推导。

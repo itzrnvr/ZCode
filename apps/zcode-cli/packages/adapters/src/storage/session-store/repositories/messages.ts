@@ -12,6 +12,13 @@ import { decodeMessageRow, decodePartRow, partCreatedAt } from "../codecs.js";
 import { encodeJson } from "../json.js";
 import type { MessageRow, PartRow } from "../rows.js";
 import { touchSession } from "./sessions.js";
+import { bumpWatermark } from "./conversation-projection.js";
+
+// conversation projection（0024）水位：下面四个函数是 message/part 的唯一写入口
+// （compact / fork / import / feedback / promoteSessionInput / actor-transcript clone 全部经此），
+// 所以在这里 +1 就等于「任何会话写入都推进 revision」，无需在每个上层写路径各自挂钩。
+// removeMessage / removePart 今天不 touchSession，光靠 session.time_updated 会对「行变少了」
+// 保持沉默 —— 那正是把已删分支当最新投影发出去的形状。
 
 // 只补回旧版快照字段，不合并整个 JSON：递归 merge 会让已清空的 metadata/options 残留。
 function preserveLegacyMembers(table: "message" | "part", keys: readonly string[]): string {
@@ -98,6 +105,7 @@ export async function saveMessage(
     sessionID,
   );
   touchSession(db, sessionID, timeUpdated);
+  bumpWatermark(db, sessionID);
 }
 
 export async function removeMessage(
@@ -108,6 +116,7 @@ export async function removeMessage(
     input.messageID,
     input.sessionID,
   );
+  bumpWatermark(db, input.sessionID);
 }
 
 export async function savePart(
@@ -179,6 +188,7 @@ export async function savePart(
     messageID,
   );
   touchSession(db, sessionID, now);
+  bumpWatermark(db, sessionID);
 }
 
 function copyLegacyMembers(
@@ -216,6 +226,7 @@ export async function removePart(
     input.messageID,
     input.sessionID,
   );
+  bumpWatermark(db, input.sessionID);
 }
 
 export async function messages(

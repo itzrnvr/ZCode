@@ -214,6 +214,7 @@ import type {
   ZCodeAgentConversationFileChangesParams,
   ZCodeAgentConversationFileRewindPreviewParams,
   ZCodeAgentConversationRowsRangeParams,
+  ZCodeAgentConversationRowsParams,
   ZCodeAgentConversationPlansParams,
   ZCodeAgentConversationWorkflowRunEventsParams,
   ZCodeAgentConversationWorkflowRunArtifactDataParams,
@@ -264,6 +265,7 @@ import {
   v4ConversationFileChangesResultSchema,
   v4ConversationFileRewindPreviewResultSchema,
   v4ConversationRowsRangeResultSchema,
+  v4ConversationRowsResultSchema,
   v4ConversationPlansResultSchema,
   v4ConversationWorkflowRunEventsResultSchema,
   v4ConversationWorkflowRunArtifactDataResultSchema,
@@ -5320,6 +5322,28 @@ export function createZCodeAgentService(
           limit: params.limit,
         },
         v4ConversationRowsRangeResultSchema,
+      );
+    },
+
+    // 投影快路径：只读 query 透传（超时重发安全，无订阅状态）。
+    // ok:false 是数据面结论而不是传输错误，所以不 throw —— 客户端按 reason 分「重试」与
+    // 「退回 rowsRange」。行校验在这一跳做一次即可（result schema 里就是
+    // z.array(conversationRowSchema)），CLI 侧不再重复全量 zod：它跑在宿主进程，
+    // 而 renderer 只拿 ProxyChannel 代理，本来就不解析 RPC 结果。
+    async conversationRowsV4(params: ZCodeAgentConversationRowsParams) {
+      const trusted = readTrustedZCodeAgentV4Connection(params);
+      if (!trusted) throw new Error("fault.conversation.rowsConnectionUntrusted");
+      const client = await getReadOnlyClient(params);
+      return client.request(
+        V4_METHODS.conversationRows,
+        {
+          sessionId: params.sessionId,
+          clientMode: trusted.clientMode,
+          ...(params.minRevision !== undefined ? { minRevision: params.minRevision } : {}),
+          ...(params.beforeRowId !== undefined ? { beforeRowId: params.beforeRowId } : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        },
+        v4ConversationRowsResultSchema,
       );
     },
 

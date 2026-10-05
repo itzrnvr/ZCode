@@ -99,6 +99,7 @@ import type {
   V4ConversationWorkflowRunWorkspaceResult,
   V4ConversationWorkflowRunsResult,
   V4ConversationRowsRangeResult,
+  V4ConversationRowsResult,
   V4ConversationResyncResult,
   V4ConversationSubscribeResult,
   V4SessionsIndexSubscribeResult,
@@ -389,6 +390,20 @@ export interface ZCodeAgentConversationRowsRangeParams extends ZCodeAgentSession
   beforeRowId?: number;
   /** 1..rowsRangeMaxLimit（200）。 */
   limit: number;
+}
+
+/**
+ * 投影快路径（0024）：从 CLI 的 SQLite 直接取已物化的行，不激活 runtime。
+ * 与 rowsRange 的区别是数据源，不是形状——rowsRange 读活投影（冷会话要先 resume），
+ * 这条读写入时增量物化下来的行，因此可以在点击路径上同步返回。
+ */
+export interface ZCodeAgentConversationRowsParams extends ZCodeAgentSessionTarget {
+  /** 只接受「至少这么新」的投影；不满足回 stale。逐字比较，不可解析。 */
+  minRevision?: string;
+  /** 取 rowId < beforeRowId 的行；缺省 = 从当前尾部向前。 */
+  beforeRowId?: number;
+  /** 缺省 snapshotTailWindowRows（60）；1..rowsRangeMaxLimit（200）。 */
+  limit?: number;
 }
 
 /** 当前有效分支里的终态 ExitPlanMode 目录。 */
@@ -768,6 +783,13 @@ export interface IZCodeAgentService {
   conversationRowsRangeV4(
     params: ZCodeAgentConversationRowsRangeParams,
   ): Promise<V4ConversationRowsRangeResult>;
+  /**
+   * 投影快路径 query。ok:false 是数据面结论（缺表/在建/过期/分支不可判定），不是传输错误，
+   * 所以不 throw；调用方按 reason 分「重试」与「退回 conversationRowsRangeV4」两类处理。
+   * 返回的行不带 turnHeader.fileChanges（其源是激活期的 CheckpointCreated 内存事件 +
+   * record.app.readToolResultArtifact），缺席表示「还没有」，不是「没有改动」。
+   */
+  conversationRowsV4(params: ZCodeAgentConversationRowsParams): Promise<V4ConversationRowsResult>;
   conversationPlansV4(
     params: ZCodeAgentConversationPlansParams,
   ): Promise<V4ConversationPlansResult>;

@@ -4,6 +4,17 @@ export {
   openStartupSqliteSessionStore,
   SqliteSessionStore,
 } from "./session-store/sqlite-session-store.js";
+export type { ConversationProjectionSink } from "./session-store/sqlite-session-store.js";
+// conversation projection（0024）的存取词汇同样住在 adapters：行内容对存储层不透明
+// （payload 是 bootstrap 序列化出来的 ConversationRow），但 schema 版本号必须与写入方共用
+// 同一个常量，否则「升位即让旧行失效」这条规则会在两边各写一份然后漂移。
+export { CONV_PROJECTION_SCHEMA_VERSION } from "./session-store/migrations/0024-conversation-projection.js";
+export type {
+  ProjectionMeta,
+  ProjectionPage,
+  ProjectionView,
+  StoredProjectionRow,
+} from "./session-store/repositories/conversation-projection.js";
 export { createDwfJournalStore } from "./session-store/repositories/dwf-journal.js";
 // run 内省查询的类型住在 adapters 而不是 contracts：它们说的是 **journal 行**的词汇
 // （dwf_run 的列 + 时间戳），不是跨边界的工具载荷；而 bootstrap 已经依赖 @zcode/adapters，

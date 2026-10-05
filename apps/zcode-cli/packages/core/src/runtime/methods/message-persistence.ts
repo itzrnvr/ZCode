@@ -333,6 +333,39 @@ export async function persistAssistantMessage(
   );
 }
 
+/**
+ * conversation projection（0024）脏通知：fire-and-forget。
+ *
+ * 写入路径不能 await 折叠（一次折叠在有界尾部上是 50ms~2s 量级），也不能被通知里的异常打断，
+ * 所以这里同步转发、异常降级成一条 debug 日志。少一次通知不影响正确性：水位由 adapters 的四个
+ * message/part mutator 无条件推进，view 路径每次读都会拿 meta revision 与现算 revision 比对，
+ * 不一致就回 stale 并重排折叠。这条通知只买「后台预热」——让活跃会话的投影在点击之前就是新的。
+ *
+ * phase 只在这里判定一次：persistAssistantMessage 走的就是 persistMessage（它把
+ * update.completed / update.error 放进 input.time.completed / input.error），所以不需要在
+ * 两处各挂一个钩子，也不存在重复通知。
+ */
+function notifyConversationProjectionDirty(
+  runtime: AgentRuntimeInternal,
+  sessionID: SessionId,
+  phase: "message" | "part" | "turn-finalized",
+): void {
+  const store = runtime.sessionStore;
+  if (!store) return;
+  try {
+    store.notifyConversationProjectionDirty?.({ sessionID, phase });
+  } catch (error) {
+    runtime.logger?.debug("Conversation projection dirty notification failed", {
+      error: error instanceof Error ? error.message : String(error),
+      event: "session.projection.notify_failed",
+      module: "core.runtime",
+      phase,
+      sessionId: sessionID,
+      status: "failed",
+    });
+  }
+}
+
 export async function persistMessage(
   this: AgentRuntimeInternal,
   input: Parameters<SessionStorePort["saveMessage"]>[0],
@@ -341,6 +374,13 @@ export async function persistMessage(
 ): Promise<void> {
   if (!this.sessionStore) return;
   await this.sessionStore.saveMessage(input, copyFrom);
+  notifyConversationProjectionDirty(
+    this,
+    input.sessionID,
+    input.role === "assistant" && (input.time.completed !== undefined || input.error !== undefined)
+      ? "turn-finalized"
+      : "message",
+  );
   this.logger?.debug("Session message persisted", {
     ...traceContextToLogContext(traceContext),
     event: "session.message.persisted",
@@ -359,6 +399,7 @@ export async function persistPart(
 ): Promise<void> {
   if (!this.sessionStore) return;
   await this.sessionStore.savePart(input, copyFrom);
+  notifyConversationProjectionDirty(this, input.sessionID, "part");
   this.logger?.debug("Session part persisted", {
     ...traceContextToLogContext(traceContext),
     event: "session.part.persisted",

@@ -47,6 +47,10 @@ import {
   stopSession,
   subscribeSession,
 } from "./server-operations.js";
+import {
+  getConversationRows,
+  installConversationProjectionSink,
+} from "./conversation-rows-operation.js";
 import { listChildProcesses } from "./process-child-processes.js";
 import { ProtocolRuntimeResources } from "./runtime-resources.js";
 import {
@@ -267,6 +271,9 @@ export class ZCodeProtocolAgentServer {
     };
     // v4 通道：gateway 闭包持有 context 做帧出口与命令副作用，构造完立即挂回。
     this.context.v4Gateway = createConversationV4Gateway(this.context);
+    // conversation projection（0024）的后台折叠 sink：eager 安装，让预热在任何点击之前就开始
+    // 累积。lazy 兜底在 getConversationRows 首行（幂等），宿主没走这条构造线时仍然工作。
+    installConversationProjectionSink(this.context);
     this.browserControlPort = createProtocolBrowserControlBroker(this.context);
     const sessionResidentTargetCount =
       deps.sessionResidentPoolOptions?.targetCount ?? deps.sessionResidentTargetCount;
@@ -564,6 +571,12 @@ export class ZCodeProtocolAgentServer {
         return await getUsageStats(this.context, request.params);
       case V4_METHODS.conversationUsage:
         return await getTaskTokenUsage(this.context, request.params);
+      // ── conversation rows（additive）：投影的持久化快路径，只读 SQLite（0024 三张表），
+      // 不经 v4Gateway —— 那条路会 ensureResumed -> app.resume()，把 4663ms 的运行时构造
+      // 重新拉回点击路径。handler 自身任何路径都不折叠、不拿写锁（串行车道约束见该文件头），
+      // 缺表/在建/过期一律 ok:false，客户端退回 rowsRange。──
+      case V4_METHODS.conversationRows:
+        return await getConversationRows(this.context, request.params);
       case V4_METHODS.command:
         return this.requireV4Gateway().handleCommand(request.params);
       case V4_METHODS.commandsQuery:

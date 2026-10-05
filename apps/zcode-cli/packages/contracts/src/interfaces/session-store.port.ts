@@ -1196,6 +1196,18 @@ export interface SessionStorePort {
   }): Promise<SessionInputRecord[]>;
   /** global createSession.firstInput 查重：由 queue_<sourceCommandId> 找回真实 session。 */
   getSessionInputById?(id: string): Promise<SessionInputRecord | null>;
+  /**
+   * conversation projection（0024）脏通知：message/part 落库后告知宿主「这个会话的投影需要重算」。
+   * 可选——旧宿主不实现时，view 路径靠 watermark 与 meta revision 的比对（pull）自愈，只是失去
+   * 后台预热，正确性不受影响：水位本身由 adapters 的四个 message/part mutator 无条件推进。
+   * 同步返回：调用方在 agent 写入路径上，既不能 await，也不能被这里的异常打断；
+   * 实现方必须自己吞掉异步错误。
+   */
+  notifyConversationProjectionDirty?(input: {
+    sessionID: SessionId;
+    /** message = 普通落库；part = 分片落库；turn-finalized = assistant 终态（completed/error）。 */
+    phase: "message" | "part" | "turn-finalized";
+  }): void;
   readTodos(input: { sessionID: SessionId }): Promise<TodoItem[]>;
   updateTodos(input: { sessionID: SessionId; todos: TodoItem[] }): Promise<void>;
   readTarget(input: { sessionID: SessionId }): Promise<SessionGoal | null>;

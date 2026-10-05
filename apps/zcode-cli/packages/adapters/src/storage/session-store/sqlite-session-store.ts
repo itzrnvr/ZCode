@@ -89,6 +89,11 @@ import type {
 } from "./options.js";
 import { ensureParentDir, getDefaultSessionDbPath } from "./paths.js";
 import { maybeThrowStorageFsFault } from "../fs-fault-injection.js";
+import * as conversationProjectionRepository from "./repositories/conversation-projection.js";
+import type {
+  ProjectionView,
+  StoredProjectionRow,
+} from "./repositories/conversation-projection.js";
 import * as debugRepository from "./repositories/debug.js";
 import { createDwfJournalStore } from "./repositories/dwf-journal.js";
 import * as inputHistoryRepository from "./repositories/input-history.js";
@@ -223,6 +228,20 @@ function assertForkBundleChildLocal(bundle: ForkCommitBundle): void {
 
 const deferredStartup = Symbol("deferredSqliteStartup");
 
+/**
+ * conversation projection（0024）的脏通知落点。
+ *
+ * 同步签名是有意的：调用方在 agent 写入路径上（core/runtime/methods/message-persistence.ts），
+ * 既不能 await 也不能被这里的异常打断，所以实现方必须自己吞掉异步错误。
+ * 注册在**具体类**上而不是 SessionStorePort 上 —— 端口只多一个可选的通知方法，
+ * 折叠本身属于 bootstrap（product-projection / cold-event-merge 都在那边），
+ * 而 adapters 不能反向依赖 bootstrap。
+ */
+export type ConversationProjectionSink = (input: {
+  sessionID: SessionId;
+  phase: "message" | "part" | "turn-finalized";
+}) => void;
+
 export class SqliteSessionStore
   implements
     SessionStorePort,
@@ -235,6 +254,7 @@ export class SqliteSessionStore
   private readonly dbPath: string;
   private readonly forkCommitFaultAt?: ForkCommitFaultStage;
   private dwfJournalStore?: JournalStorePort;
+  private conversationProjectionSink?: ConversationProjectionSink;
 
   constructor(options: SqliteSessionStoreOptions = {}, startupToken?: symbol) {
     this.dbPath = options.dbPath ?? getDefaultSessionDbPath();
@@ -654,6 +674,53 @@ export class SqliteSessionStore
     return messagesTail(this.db, input);
   }
 
+  // ── conversation projection（0024）──
+  // 只读方法刻意**不**进 throwBeforeWrite：view 路径必须能在 fs fault 注入下仍然读出已物化
+  // 的行，否则「注入一个写故障」会顺带把只读快路径也打死，测出来的就不是同一件事。
+  async readConversationProjectionWatermark(sessionID: SessionId): Promise<number> {
+    return conversationProjectionRepository.readWatermark(this.db, sessionID);
+  }
+
+  /**
+   * meta + 一页行，一个 `begin deferred` 快照读事务内取完。
+   * 分开读会拿到「旧 meta revision + 新 rows」这种跨状态拼接，见 repository 的 readView 注释。
+   */
+  async readConversationProjectionView(
+    sessionID: SessionId,
+    opts: { beforeRowId?: number; limit: number },
+  ): Promise<ProjectionView> {
+    return conversationProjectionRepository.readView(this.db, sessionID, opts);
+  }
+
+  async commitConversationProjection(input: {
+    sessionID: SessionId;
+    expectedSeq: number;
+    revision: string;
+    schemaVersion: number;
+    rows: readonly StoredProjectionRow[];
+  }): Promise<{ committed: boolean; rewritten: number }> {
+    this.throwBeforeWrite();
+    return conversationProjectionRepository.commitIfCurrent(this.db, input);
+  }
+
+  async deleteConversationProjection(sessionID: SessionId): Promise<void> {
+    this.throwBeforeWrite();
+    return conversationProjectionRepository.deleteProjection(this.db, sessionID);
+  }
+
+  /** 脏通知转发。无 sink 时是 no-op：水位仍由四个 mutator 无条件推进，读路径靠比对自愈。 */
+  notifyConversationProjectionDirty(input: {
+    sessionID: SessionId;
+    phase: "message" | "part" | "turn-finalized";
+  }): void {
+    this.conversationProjectionSink?.(input);
+  }
+
+  /** 折叠归属 bootstrap；这里只留一个落点，端口面不因此变宽（见 ConversationProjectionSink）。 */
+  setConversationProjectionSink(sink: ConversationProjectionSink | null): void {
+    this.conversationProjectionSink = sink ?? undefined;
+  }
+
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {
     this.throwBeforeWrite();
     return sessionEntryRepository.saveSessionEntry(this.db, input);
@@ -911,11 +978,19 @@ export class SqliteSessionStore
     revert: SessionRevert;
     summary?: { additions: number; deletions: number; files: number; diffs?: FileDiff[] };
   }): Promise<void> {
-    return sessionRepository.setRevert(this.db, input);
+    await sessionRepository.setRevert(this.db, input);
+    // revert 之后活跃分支不可由有界尾部重建（v4-bridge 因此拒绝 messagesTail，实测 2703-part
+    // 会话被截成 6 条消息 -> 空会话）。delete-on-uncertain：删 meta+rows，watermark 保留
+    // （revision 不能倒退）。下一次读回 building，重建成本不过一次折叠。
+    // 刻意不加 throwBeforeWrite：这两个方法今天就没有，加上会改变 fs fault 注入的可观察行为。
+    conversationProjectionRepository.deleteProjection(this.db, input.sessionID);
   }
 
   async clearRevert(sessionID: SessionId): Promise<void> {
-    return sessionRepository.clearRevert(this.db, sessionID);
+    await sessionRepository.clearRevert(this.db, sessionID);
+    // 清空 revert 同样要删：留着的话下一次读会把「按已撤销分支折叠出来的行」当最新投影发出去。
+    // 删掉后从 building 重新进入，重建一次即回到正确分支。
+    conversationProjectionRepository.deleteProjection(this.db, sessionID);
   }
 
   async upsertScriptWorkflowDefinition(
