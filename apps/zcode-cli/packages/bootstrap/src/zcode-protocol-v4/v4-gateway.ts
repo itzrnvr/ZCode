@@ -125,7 +125,9 @@ import {
 import { AttachmentUploadRegistry } from "./attachment-upload-registry.js";
 import {
   ColdSessionResumeCoordinator,
+  type ColdDeferredSource,
   type ColdSessionResumeOutcome,
+  type ColdViewMaterialOutcome,
 } from "./cold-session-resume.js";
 import { CommandInbox } from "./command-inbox.js";
 import {
@@ -179,6 +181,24 @@ interface PersistedEventsLoadResult {
   sourceEventSeq?: number;
   /** 与本次历史事件使用同一容量的种子；null 表示已查询但没有历史水位。 */
   usageSeed?: SessionUsageSeed | null;
+  /**
+   * 视图冷物化（无 backing record）时缺席的事实来源；非空即表示这份投影只是 READY 水位
+   * 的一个前缀，view→READY 升级必须强制重建一次才能收敛（见 convergeColdViewAfterActivation）。
+   */
+  deferredColdSources?: readonly ColdDeferredSource[];
+}
+
+/**
+ * subscribe 携带、但 activation 被视图路径推迟后才用得到的 resume 参数。
+ *
+ * 升级入口（command / journal 读 / attachmentBegin）手里只有 sessionId，拿不到当初
+ * subscribe 的档位与 workspace；不记住就会静默丢掉用户请求的 thoughtLevel，并让远端
+ * 会话退回按目录重建 workspace（identity 退化 → 命中不到按 workspaceID 隔离的
+ * provider registry，见 activateSessionForResume 的同名注释）。
+ */
+interface ColdResumeHints {
+  resumeThoughtLevel?: string;
+  workspace?: ZCodeWorkspaceRef;
 }
 
 type V4GatewayErrorContext = Record<string, unknown>;
@@ -218,6 +238,15 @@ export interface V4GatewayHost {
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
   ): Promise<ColdSessionResumeOutcome>;
+  /**
+   * V4 视图冷物化钩子：只判持久层存在性 + 尾读，**绝不**激活 runtime。
+   *
+   * 与 {@link resumePersistedSession} 分开是有意的：只读订阅要的是投影，不是运行时，
+   * 借道 resume 会把 4663ms 的 app.resume() 运行时构造重新拉回点击路径（实测冷开
+   * 22515 part 会话 11216ms 到首行，activation 占 4663ms 而磁盘尾读只占 16ms）。
+   * 缺席（旧宿主 / 测试桩）→ gateway 整条退回 activation 路径，语义与拆分前逐字相同。
+   */
+  readColdViewMaterial?(sessionId: string): Promise<ColdViewMaterialOutcome>;
   /**
    * 下行物理帧出口（宿主负责投递：stdio notification / MessagePort / ws）。
    *
@@ -568,6 +597,23 @@ export class ConversationV4Gateway {
   private readonly hydrationInFlight = new Map<string, Promise<ConversationTopicPublisher>>();
   /** cold activation 到 hydration 的 READY 水位；只阻塞本次恢复期间的 command/query。 */
   private readonly readyFlights = new Map<string, Promise<ConversationTopicPublisher>>();
+  /** 视图冷物化（裸读 + hydrate，不含 activation）按 session 单飞。 */
+  private readonly viewFlights = new Map<string, Promise<ConversationTopicPublisher>>();
+  /**
+   * 当前投影是「视图水位」的 session：hydration 跑在没有 backing record 的取数上
+   * （bridge 报了 deferredColdSources）。第一条需要 runtime 的入口据此升级到 READY。
+   *
+   * 标记时机是**视图 flight 开始**而不是 hydration 结束：16ms 的裸读窗口里也可能有命令
+   * 进来，handleCommand 要靠它决定升级；随后 performHydration 按 bridge 的报告复写，
+   * 因此"标了但实际是 record-backed"的窗口会自行收敛掉。
+   */
+  private readonly coldViewSessions = new Set<string>();
+  /** 视图水位缺失的事实来源（诊断 + 决定是否值得强制重建）。 */
+  private readonly deferredColdSources = new Map<string, readonly ColdDeferredSource[]>();
+  /** activation 之后收敛视图水位的单飞；与 readyFlights 分开（后者的语义是阻塞 command/query）。 */
+  private readonly convergeFlights = new Map<string, Promise<void>>();
+  /** 视图路径记下的 resume 参数，升级 activation 时原样兑现（见 ColdResumeHints）。 */
+  private readonly coldResumeHints = new Map<string, ColdResumeHints>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
   /** transcript 合成序列与 runtime raw 序列之间的 per-session 单调映射。 */
@@ -1387,7 +1433,9 @@ export class ConversationV4Gateway {
       `subscribe conversation session=${sessionId} coldResume=${String(!isLiveConversation)}`,
     );
     // Hydration：首次订阅时从权威来源重建投影。
-    // - 无 publisher（cold）→ 建 + 重放。
+    // - 无 publisher（cold）→ 建 + 重放。冷会话走**视图冷物化**：只裸读 transcript 建投影，
+    //   不激活 runtime（4663ms 的 app.resume() 推迟到第一条需要 runtime 的命令/查询）。
+    //   subscribe 携带的 resume 档位/workspace 记进 coldResumeHints，升级时原样兑现。
     // - 有 publisher 但事件日志覆盖不了 transcript（fork child：resume 的 ingest 抢先
     //   建了个只含 fork 事件的 cold publisher）→ 用 transcript 合成**重建**。
     // - 有 publisher 且事件日志完整（流式 live）→ 保留，重放会双计且打断流。
@@ -1396,11 +1444,12 @@ export class ConversationV4Gateway {
     const publisher = existingReady
       ? await existingReady
       : !isLiveConversation
-        ? await this.ensureColdReadyPublisher(
-            sessionId,
-            params.resumeThoughtLevel,
-            params.workspace,
-          )
+        ? await this.ensureColdViewPublisher(sessionId, {
+            ...(params.resumeThoughtLevel
+              ? { resumeThoughtLevel: params.resumeThoughtLevel }
+              : {}),
+            ...(params.workspace ? { workspace: params.workspace } : {}),
+          })
         : await this.hydratePublisher(sessionId);
     const cliSessionRestoreMs = !isLiveConversation
       ? Math.max(0, Math.round(performance.now() - restoreStartedAt))
@@ -1565,7 +1614,7 @@ export class ConversationV4Gateway {
   /**
    * v4/conversation/rowsRange：按 beforeRowId 游标向上取一窗
    * 历史行。只读 query，不建订阅；数据源 = 该会话投影全量行——冷会话（重启后直开
-   * 历史）复用与 subscribe 相同的冷恢复 + hydration 管线先把投影建起来。
+   * 历史）复用与 subscribe 相同的**视图** hydration 管线先把投影建起来，不激活 runtime。
    */
   async rowsRange(rawParams: unknown): Promise<V4ConversationRowsRangeResult> {
     const params = v4ConversationRowsRangeParamsSchema.parse(rawParams);
@@ -1573,7 +1622,7 @@ export class ConversationV4Gateway {
     const publisher = existingReady
       ? await existingReady
       : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
+        ? await this.ensureColdViewPublisher(params.sessionId)
         : await this.hydratePublisher(params.sessionId);
     return publisher.getRowsRange(
       {
@@ -1585,14 +1634,14 @@ export class ConversationV4Gateway {
     );
   }
 
-  /** 完整有效 projection 的终态计划目录；冷会话复用订阅 hydration。 */
+  /** 完整有效 projection 的终态计划目录；冷会话复用订阅的视图 hydration，不激活 runtime。 */
   async plans(rawParams: unknown): Promise<V4ConversationPlansResult> {
     const params = v4ConversationPlansParamsSchema.parse(rawParams);
     const existingReady = this.readyFlights.get(params.sessionId);
     const publisher = existingReady
       ? await existingReady
       : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
+        ? await this.ensureColdViewPublisher(params.sessionId)
         : await this.hydratePublisher(params.sessionId);
     return publisher.getPlans();
   }
@@ -1885,6 +1934,10 @@ export class ConversationV4Gateway {
    * 不需要投影（同一判断见这两个 query 刻意不带 atSeq/atLogEpoch）。习语与 attachmentBegin
    * 逐字相同；`ensureResumed` 自带按会话单飞，与并发订阅共享同一次 activation。
    *
+   * 但 activation 之后必须收敛视图水位：视图冷开的投影是在没有 record 的取数上建的，
+   * record 一到册它就过期（内存事件 / dwf 回放 / artifact 摘要 / runtime 种子全缺席），
+   * 而 `hydratedSessions` 会让后续 hydratePublisher 早退——不显式收敛就再也补不回来。
+   *
    * 活性判定必须与 subscribe 同一条
    * `hasLiveConversation`，不能只看 `sessionExists`。dwf actor transcript 是 detached live
    * 会话——真 runtime 活在 run service 里、宿主刻意没有 record；嵌套 SessionPane 的发现
@@ -1894,7 +1947,8 @@ export class ConversationV4Gateway {
    */
   private async ensureHostRecordForJournalRead(sessionId: string): Promise<void> {
     if (this.hasLiveConversation(sessionId)) return;
-    await this.coldResume.ensureResumed(sessionId);
+    const persistedMessages = await this.coldResume.ensureResumed(sessionId);
+    await this.convergeColdViewAfterActivation(sessionId, persistedMessages);
   }
 
   async fileChanges(rawParams: unknown): Promise<V4ConversationFileChangesResult> {
@@ -1974,7 +2028,8 @@ export class ConversationV4Gateway {
       throw new Error("fault.attachment.putUnsupported");
     }
     if (!this.host.sessionExists(params.sessionId)) {
-      await this.coldResume.ensureResumed(params.sessionId);
+      const persistedMessages = await this.coldResume.ensureResumed(params.sessionId);
+      await this.convergeColdViewAfterActivation(params.sessionId, persistedMessages);
     }
     return this.attachmentUploads.begin(params);
   }
@@ -2388,11 +2443,19 @@ export class ConversationV4Gateway {
       );
     }
     // READY 只存在于冷恢复窗口；正常命令直接进入 inbox，避免重复解析信封。
-    if (this.readyFlights.size > 0) {
+    // 视图冷物化的会话还没有 backing record：inbox 的 getRevision 会判 sessionNotFound，
+    // 所以命令入口必须先把视图水位升级成 READY（activation 恰好一次，由 readyFlights 单飞）。
+    // live-detached 会话绝不升级——它的 runtime 活在别处，再 resume 一次就是第二个幽灵 record。
+    if (this.readyFlights.size > 0 || this.coldViewSessions.size > 0) {
       const parsed = parseCommandEnvelope(rawParams);
       const sessionId = parsed.ok ? parsed.envelope.sessionId : null;
-      const ready = sessionId === null ? undefined : this.readyFlights.get(sessionId);
-      if (ready) await ready;
+      if (sessionId !== null) {
+        const ready = this.readyFlights.get(sessionId);
+        if (ready) await ready;
+        else if (this.coldViewSessions.has(sessionId) && !this.hasLiveConversation(sessionId)) {
+          await this.ensureColdReadyPublisher(sessionId);
+        }
+      }
     }
 
     const outcome = await this.inbox.handle(rawParams);
@@ -2778,6 +2841,11 @@ export class ConversationV4Gateway {
     this.hydrationBuffers.delete(sessionId);
     this.hydrationInFlight.delete(sessionId);
     this.readyFlights.delete(sessionId);
+    this.viewFlights.delete(sessionId);
+    this.convergeFlights.delete(sessionId);
+    this.coldViewSessions.delete(sessionId);
+    this.deferredColdSources.delete(sessionId);
+    this.coldResumeHints.delete(sessionId);
     this.rawSequenceStates.delete(sessionId);
     if (options.clearCommandInbox) this.inbox.clearSession(sessionId);
     this.telemetryNormalizer.clearSession(sessionId);
@@ -2830,6 +2898,11 @@ export class ConversationV4Gateway {
     this.hydrationBuffers.clear();
     this.hydrationInFlight.clear();
     this.readyFlights.clear();
+    this.viewFlights.clear();
+    this.convergeFlights.clear();
+    this.coldViewSessions.clear();
+    this.deferredColdSources.clear();
+    this.coldResumeHints.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -2893,6 +2966,110 @@ export class ConversationV4Gateway {
   }
 
   /**
+   * 视图冷物化：只建投影，**不**激活 runtime（view/activate split）。
+   *
+   * 一次冷开的点击今天要先付 4663ms 的 `app.resume()` 运行时构造（实测 22515 part 会话
+   * 11216ms 到首行，其中磁盘尾读只占 16ms），而只读订阅要的只是投影。这里把「读持久
+   * transcript + 三源合并」与「激活 runtime」拆开：视图路径只做前者，第一条需要 runtime
+   * 的命令/查询再经 {@link ensureColdReadyPublisher} 升级——activation 恰好一次，升级后
+   * 由 {@link convergeColdViewAfterActivation} 强制一次原子重建收敛到今天的状态。
+   *
+   * 宿主没有裸读面（`readViewMaterial` 回 unsupported）→ 整条退回 activation，语义与
+   * 拆分前逐字相同；持久层也查不到 → 协调器抛 V4SubscribeSessionUnavailableError，
+   * 与 resume 路径同一个错误类、同一个 reasonCode。
+   */
+  private ensureColdViewPublisher(
+    sessionId: string,
+    resumeHints?: ColdResumeHints,
+  ): Promise<ConversationTopicPublisher> {
+    // activation 已在飞：READY 水位本身就包含 hydration，视图路径直接搭这趟车。
+    const ready = this.readyFlights.get(sessionId);
+    if (ready) return ready;
+    const converge = this.convergeFlights.get(sessionId);
+    if (converge) return converge.then(() => this.hydratePublisher(sessionId));
+    const existing = this.viewFlights.get(sessionId);
+    if (existing) return existing;
+    // 同步记下（早于任何 await）：并发的升级入口必须能立刻读到这份参数。
+    // 后到者覆盖：会话被 resident pool 回收后再次冷开时，新 subscribe 带的才是当前
+    // attachment 的 workspace 身份；先入为主会把上一轮的 identity 一直用到升级那一刻。
+    if (resumeHints) this.coldResumeHints.set(sessionId, resumeHints);
+    const flight = (async () => {
+      // 标记先于取数：16ms 的裸读窗口里也可能有命令进来，handleCommand 靠它决定升级。
+      // performHydration 随后按 bridge 的报告复写，所以这里乐观标记不会留下假象。
+      this.coldViewSessions.add(sessionId);
+      try {
+        const material = await this.coldResume.readViewMaterial(sessionId);
+        if (material.status === "unsupported") {
+          this.coldViewSessions.delete(sessionId);
+          return await this.ensureColdReadyPublisher(sessionId);
+        }
+        return await this.hydratePublisher(sessionId, material.persistedMessages);
+      } catch (error) {
+        // 取数失败时 hydration 从未跑过，标记必然是乐观留下的：清掉，否则后续
+        // activation 会为一份不存在的视图水位白重建一次投影。
+        this.coldViewSessions.delete(sessionId);
+        throw error;
+      }
+    })();
+    this.viewFlights.set(sessionId, flight);
+    const clear = () => {
+      if (this.viewFlights.get(sessionId) === flight) this.viewFlights.delete(sessionId);
+    };
+    void flight.then(clear, clear);
+    return flight;
+  }
+
+  /**
+   * activation 之后把视图水位收敛成 READY 水位的唯一入口。
+   *
+   * 必须显式收敛而不能靠"再 hydrate 一次"：视图 hydration 已经把 session 写进
+   * `hydratedSessions`，hydratePublisher 会据此早退，record-only 的事实（内存事件、
+   * dwf 回放、artifact 文件摘要、runtime config/usage 种子）就永久缺席了。
+   *
+   * 单飞由 convergeFlights 承担（readyFlights 的语义是阻塞 command/query，journal 读与
+   * attachmentBegin 不该借它）。重建走 publisher.rehydrate：候选投影完整重放成功后一次性
+   * adopt，订阅只被要求 resync，因此是原子替换而不是"清空再逐条补"的闪烁。
+   *
+   * @returns 收敛后的 publisher；没有视图水位时返回 undefined（调用方保持原语义）。
+   */
+  private async convergeColdViewAfterActivation(
+    sessionId: string,
+    persistedMessages?: MessageWithParts[],
+  ): Promise<ConversationTopicPublisher | undefined> {
+    if (!this.coldViewSessions.has(sessionId)) return undefined;
+    const inflight = this.convergeFlights.get(sessionId);
+    if (inflight) {
+      await inflight;
+      return this.publishers.get(sessionId);
+    }
+    const flight = (async () => {
+      // 视图 hydration 可能还在飞（裸读 16ms + 三源合成数百 ms）：先等它落地，
+      // deferredColdSources 才是 bridge 刚写下的那一份，而不是上一轮的残值。
+      await this.hydrationInFlight.get(sessionId);
+      const deferred = this.deferredColdSources.get(sessionId) ?? [];
+      this.coldViewSessions.delete(sessionId);
+      this.deferredColdSources.delete(sessionId);
+      // 视图水位让位，否则 record-backed 的这次 hydration 会被早退掉。
+      this.hydratedSessions.delete(sessionId);
+      this.host.onDebug?.(
+        `v4 cold view upgrade session=${sessionId} deferredSources=${deferred.length} ` +
+          `rebuild=${String(deferred.length > 0)}${
+            deferred.length > 0 ? ` (${deferred.join(",")})` : ""
+          }`,
+      );
+      // 分歧集为空 = 视图那份投影与 activation 后逐字相同，重建只会白付一次全量合成。
+      await this.hydratePublisher(sessionId, persistedMessages, deferred.length > 0);
+    })();
+    this.convergeFlights.set(sessionId, flight);
+    try {
+      await flight;
+    } finally {
+      if (this.convergeFlights.get(sessionId) === flight) this.convergeFlights.delete(sessionId);
+    }
+    return this.publishers.get(sessionId);
+  }
+
+  /**
    * 冷恢复 READY 只在明确需要 activation 的入口创建；hydratePublisher 保持 projection-only。
    * 注册 promise 早于 activation，避免 record 提前入册后并发 command/query 越过恢复水位。
    */
@@ -2905,12 +3082,14 @@ export class ConversationV4Gateway {
     if (existingFlight) return existingFlight;
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
+      const hints = this.coldResumeHints.get(sessionId);
       const persistedMessages = await this.coldResume.ensureResumed(
         sessionId,
-        resumeThoughtLevel,
-        workspace,
+        resumeThoughtLevel ?? hints?.resumeThoughtLevel,
+        workspace ?? hints?.workspace,
       );
-      return this.hydratePublisher(sessionId, persistedMessages);
+      const converged = await this.convergeColdViewAfterActivation(sessionId, persistedMessages);
+      return converged ?? (await this.hydratePublisher(sessionId, persistedMessages));
     });
     this.readyFlights.set(sessionId, operation);
     // 成功和失败都由同一清理函数释放；不创建会重复传播 rejection 的派生 promise。
@@ -2997,6 +3176,21 @@ export class ConversationV4Gateway {
       throw new Error(`v4 hydration cancelled for session ${sessionId}`);
     }
 
+    // bridge 报告这次 hydration 跑在没有 backing record 的取数上（视图冷物化）：记下分歧
+    // 集，第一条需要 runtime 的入口据此强制一次原子重建（ruling 5）。权威判定放在这里而
+    // 不是 ensureColdViewPublisher，因为只有 bridge 知道 record 在不在——detached live
+    // child 也没有自己的 record，却经父 record 兜底拿到了 record-backed 的取数，不该被
+    // 当成视图水位（否则会给它激活出第二个 runtime）。
+    const deferred = loaded.deferredColdSources ?? [];
+    const recordlessHydration = deferred.length > 0;
+    if (recordlessHydration) {
+      this.coldViewSessions.add(sessionId);
+      this.deferredColdSources.set(sessionId, deferred);
+    } else {
+      this.coldViewSessions.delete(sessionId);
+      this.deferredColdSources.delete(sessionId);
+    }
+
     // assistant 守恒：拒收过正文流的 publisher 不可信——它建立于
     // TurnStarted 之后，缺段无法用 append-only 重放补进中间位置，只能整体重建。
     const latestPublisher = this.publishers.get(sessionId);
@@ -3008,6 +3202,7 @@ export class ConversationV4Gateway {
       latestPublisher === existingAtStart &&
       !loaded.synthesized &&
       !forceRebuild &&
+      !recordlessHydration &&
       !existingDroppedContent
     ) {
       // 创建时种子可能落空（record 尚未入册），首次订阅补一次（幂等、事件优先）。

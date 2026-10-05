@@ -36,6 +36,7 @@ import {
 import {
   loadPersistedConversationMaterialization,
   mergeColdConversationEvents,
+  type ColdEventMergeResult,
 } from "../zcode-protocol-v4/cold-event-merge.js";
 import { writeColdHydrationCache } from "../zcode-protocol-v4/cold-hydration-cache.js";
 import {
@@ -48,6 +49,7 @@ import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-se
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
   ConversationRowTargetResolution,
+  SessionConfigSeed,
   SessionUsageSeed,
 } from "../zcode-protocol-v4/product-projection.js";
 import { PersistentCommandIndex } from "../zcode-protocol-v4/persistent-command-index.js";
@@ -67,6 +69,7 @@ import {
   ConversationV4Gateway,
   V4CommandNotImplementedError,
 } from "../zcode-protocol-v4/v4-gateway.js";
+import { COLD_VIEW_DEFERRED_SOURCES } from "../zcode-protocol-v4/cold-session-resume.js";
 import {
   SESSION_ENTRY_TARGET_COMPLETION_VERIFICATION,
   SessionEventType,
@@ -80,6 +83,7 @@ import type {
   ForkCommitBundle,
   GoalStatus,
   MessageId,
+  MessageWithParts,
   ModelSelection,
   SessionEvent,
   SessionId,
@@ -92,7 +96,9 @@ import { HYDRATION_TRACE_ID } from "../zcode-protocol-v4/projection-state.js";
 import { resolveWorkspaceRefFromId } from "./mapper.js";
 import { buildLiveWorkspaceConfigStateV4 } from "./v4-workspace-config.js";
 import {
+  buildPersistedSessionConfigSeed,
   hasSessionModelProvider,
+  resolvePersistedSessionModelContextWindow,
   resolveSessionModelContextWindow,
 } from "./workspace-model-runtime.js";
 import {
@@ -101,6 +107,7 @@ import {
   createSessionRecordForV4,
   ensureSessionModelAvailableForNextTurn,
   listSessionSubagents,
+  readPersistedSessionMessages,
   registerForkedSession,
   readSessionContextUsage,
 } from "./server-operations.js";
@@ -109,6 +116,15 @@ import type {
   ZCodeProtocolSessionRecord,
 } from "./server-types.js";
 import { createProtocolLogger } from "./server-types.js";
+
+/**
+ * hydrate 三源合并的 store 窄面类型。刻意从**已导出函数的签名**派生而不是 import 那个
+ * interface：`PersistedConversationMaterializationStore` 在 cold-event-merge.ts 里未导出
+ * （该文件属于 cache lane），派生写法既不必改别人的文件，也自动跟随签名变化。
+ */
+type ColdMaterializationStore = NonNullable<
+  Parameters<typeof loadPersistedConversationMaterialization>[0]["store"]
+>;
 
 function normalizeStoredTitleSource(
   source: string | undefined,
@@ -265,12 +281,22 @@ async function replayDynamicWorkflowRunEvents(
   }));
 }
 
-async function resolveConversationBackingRecord(
+/**
+ * 冷 hydration 的取数后盾：本会话 record，或（detached live child）按持久 parentID 落到
+ * 父 record。顺带带回 workspace 身份——record-less 分支要靠它挑同 workspace 的活跃 app
+ * 解析模型档位（registry 按 workspace identity 隔离，见 workspace-model-runtime）。
+ */
+interface ColdConversationBacking {
+  record: ZCodeProtocolSessionRecord | undefined;
+  workspaceId: string | undefined;
+}
+
+async function resolveConversationBacking(
   context: ZCodeProtocolAgentServerContext,
   sessionId: string,
-): Promise<ZCodeProtocolSessionRecord | undefined> {
+): Promise<ColdConversationBacking> {
   const direct = context.sessions.get(sessionId);
-  if (direct) return direct;
+  if (direct) return { record: direct, workspaceId: direct.workspace.workspaceKey };
 
   // 运行中 subagent 有独立 child event log，但没有独立 bootstrap record。
   // 文件摘要只需要共享 event/artifact store，因此通过持久化 parentID 找到父 record 作为
@@ -278,7 +304,10 @@ async function resolveConversationBackingRecord(
   // 第二个 child runtime。
   const stored = await context.deps.sessionStore?.getSession(sessionId as SessionId);
   const parentSessionId = stored?.parentID ? String(stored.parentID) : null;
-  return parentSessionId ? context.sessions.get(parentSessionId) : undefined;
+  return {
+    record: parentSessionId ? context.sessions.get(parentSessionId) : undefined,
+    workspaceId: stored?.workspaceID ? String(stored.workspaceID) : undefined,
+  };
 }
 
 async function previewConversationFileRewind(
@@ -1458,6 +1487,175 @@ export function createConversationV4Gateway(
       return [];
     }
   };
+
+  /**
+   * 视图冷物化的持久派生 config 种子（sessionId → seed）。
+   *
+   * `getSessionConfigSeed` 是同步面，而持久派生需要尾读结果；两者在 gateway 的
+   * performHydration 里是严格前后脚（loadPersistedEvents 写 → seedPublisherConfig 读），
+   * 所以这张表只在那一瞬间有意义。record 一旦在册就删：runtime 真值优先，留着的旧种子
+   * 会让升级后的投影被一份过期事实污染（seedConfig 是字段级覆盖，且不区分种子新旧）。
+   * 生命周期与 gateway 的 publisher 表一致（只读会话从不激活时留到 disposeSession）。
+   */
+  const coldViewConfigSeeds = new Map<string, SessionConfigSeed>();
+
+  /**
+   * hydrate 三源合并的 store 窄面：record 与 record-less 两个分支共用同一份读取约定，
+   * 否则"有没有先 activation"会顺带改变 transcript 的读法，投影就该分叉了。
+   */
+  const buildMaterializationStore = (): ColdMaterializationStore | undefined => {
+    const store = context.deps.sessionStore;
+    if (!store) return undefined;
+    return {
+      getSession: (id) => store.getSession(id),
+      messages: (input) => store.messages(input),
+      // perf: hydrate 路径不能走 messagesTail —— 裸尾部读（按 part 截断）
+      // 对 revert/fork 会话选择不出版本正确的活跃分支（实测 2703-part 会话
+      // 被截成 6 条消息 → 空会话）。resume 路径已提供等价且分支正确的
+      // persistedMessages；只有它缺席时才回落全量读取，行为与修复前一致。
+      readTarget: (input) => store.readTarget(input),
+      ...(store.sessionEntries
+        ? {
+            sessionEntries: (input: { sessionID: SessionId }) =>
+              store.sessionEntries!(input).catch((error) => {
+                context.logger?.warn("v4 hydrate session entries read failed", {
+                  error: error instanceof Error ? error.message : String(error),
+                  event: "zcode_protocol.v4.hydrate_session_entries_failed",
+                  module: "bootstrap.zcode_protocol",
+                });
+                return [];
+              }),
+          }
+        : {}),
+    };
+  };
+
+  /** 三源合并的诊断落盘（两个分支同一套分级：歧义事实 warn，重复折叠 debug）。 */
+  const logColdMergeDiagnostics = (
+    sessionId: string,
+    diagnostics: ColdEventMergeResult["diagnostics"],
+  ): void => {
+    for (const diagnostic of diagnostics) {
+      const fields = {
+        ...diagnostic,
+        event: "zcode_protocol.v4.hydrate_three_source_merge",
+        module: "bootstrap.zcode_protocol",
+        sessionId,
+      };
+      if (
+        diagnostic.code === "cold_merge.ambiguous_legacy_turn_preserved" ||
+        diagnostic.code === "cold_merge.memory_boundary_preserved" ||
+        diagnostic.code === "cold_merge.unclassified_event_preserved"
+      ) {
+        context.logger?.warn("v4 hydrate preserved ambiguous cold fact", fields);
+      } else {
+        log?.debug("v4 hydrate merged duplicate cold facts", fields);
+      }
+    }
+  };
+
+  /**
+   * record-less 的冷物化（视图路径专用；ruling 2）。
+   *
+   * 与 record 版本共用同一份三源合并与同一份 store 窄面，差别只在「record 才有」的读取面
+   * 全部缺席：内存事件、dwf journal 回放、workspace checkpoint artifact、runtime 的
+   * config/usage 真值、live parent 的 subagent 投影。缺席项逐项列进 `deferredColdSources`，
+   * gateway 在 view→READY 升级时据此强制**一次**原子重建（publisher.rehydrate 候选投影
+   * 整体 adopt），所以只读打开永远不付 activation 的 4663ms，而升级后的状态与今天
+   * （activation-first）逐字相同。
+   *
+   * 刻意**不**碰冷缓存：planColdHydrationCache 的门槛要 contextWindow 与 resume 追加的
+   * 生命周期事件，两者在 record-less 分支都不成立；缓存判定属于 cache lane。
+   */
+  const loadPersistedEventsWithoutRecord = async (
+    sessionId: string,
+    workspaceId: string | undefined,
+    persistedMessages: MessageWithParts[] | undefined,
+  ) => {
+    const materializationStore = buildMaterializationStore();
+    const source = await loadPersistedConversationMaterialization({
+      memoryEvents: [],
+      persistedMessages,
+      sessionId,
+      ...(materializationStore ? { store: materializationStore } : {}),
+    });
+    // 没有 record 就没有 artifact reader；而没有内存事件就没有 CheckpointCreated，
+    // 所以这个 reader 永远不该被调用。真被调用说明「无 record ⇒ 无 checkpoint 事件」的
+    // 前提破了——宁可让 onArtifactError 落一条 warn，也不能静默产出一份空摘要。
+    const fileChangeSummariesByMessageId = await buildColdFileChangeSummaries({
+      events: source.memoryEvents,
+      messageIds: source.messages.map((message) => String(message.info.id)),
+      readArtifact: async () => {
+        throw new Error(`fault.hydrate.artifactReaderRequiresRuntime: ${sessionId}`);
+      },
+      onArtifactError: (messageId, error) =>
+        context.logger?.warn("v4 cold view file change artifact read failed", {
+          error: error instanceof Error ? error.message : String(error),
+          event: "zcode_protocol.v4.hydrate_file_changes_failed",
+          messageId,
+          module: "bootstrap.zcode_protocol",
+          sessionId,
+        }),
+    });
+    // 持久 transcript 不保存模型能力：没有 runtime 就只能按最后一次持久选型 + 同 workspace
+    // 活跃 app 的 registry 解析档位。解析不出保持 undefined（用量分母留空），绝不伪造 20 万。
+    const contextWindow = resolvePersistedSessionModelContextWindow(
+      context,
+      source.messages,
+      workspaceId,
+    );
+    const merged = mergeColdConversationEvents({
+      contextWindow,
+      fileChangeSummariesByMessageId,
+      memoryEvents: source.memoryEvents,
+      messages: source.messages,
+      sessionId,
+      goalVerificationEntries: source.goalVerificationEntries,
+      ...(Object.prototype.hasOwnProperty.call(source, "target")
+        ? { target: source.target }
+        : {}),
+    });
+    logColdMergeDiagnostics(sessionId, merged.diagnostics);
+    const subagents = await listSessionSubagents(
+      context,
+      { sessionId, endedLimit: 1 },
+      persistedMessages,
+    );
+    // config 种子只取持久事实（模型选型 + mode），thoughtLevels/planEnabled 是 runtime
+    // 能力面，缺就缺——伪造会打破「revision 不变 ⇔ 无状态变化」的 CAS 不变量。
+    const configSeed = buildPersistedSessionConfigSeed(context, source.messages, workspaceId);
+    if (configSeed) coldViewConfigSeeds.set(sessionId, configSeed);
+    else coldViewConfigSeeds.delete(sessionId);
+    // 诊断：record-less hydration 现在是**预期**状态（视图冷物化），不再是生命周期竞态，
+    // 因此从 warn 降为 info，并把缺席项一起落盘——升级时该重建什么，看这一条就够。
+    context.logger?.info("ZCode Protocol v4 hydrate without backing runtime record", {
+      activeSessionCount: context.sessions.size,
+      contextWindowResolved: contextWindow !== undefined,
+      deferredSources: COLD_VIEW_DEFERRED_SOURCES.join(","),
+      event: "zcode_protocol.v4.hydrate_recordless",
+      module: "bootstrap.zcode_protocol",
+      phase: "loadPersistedEvents",
+      sessionId,
+      synthesizedEventCount: merged.events.length,
+    });
+    return {
+      events: merged.events,
+      // readSessionContextUsage 没有 record 恒为 undefined；显式写 null 而不是省略，
+      // 是为了让 gateway 跳过 seedPublisherUsage 的二次查询（它只在 undefined 时触发）。
+      usageSeed: null,
+      synthesized: merged.usedDurableTranscript,
+      subagentsSeed: {
+        revision: subagents.revision,
+        childSessionIds: subagents.childSessionIds,
+        running: subagents.running,
+      },
+      ...(source.sharedContextImport ? { sharedContextImport: source.sharedContextImport } : {}),
+      // 没有内存 eventStore 就没有 raw 水位；gateway 按 synthesized 重算 1..N。
+      sourceEventSeq: 0,
+      deferredColdSources: COLD_VIEW_DEFERRED_SOURCES,
+    };
+  };
+
   return new ConversationV4Gateway({
     cliVersion: context.deps.version,
     sessionExists: (sessionId) => context.sessions.has(sessionId),
@@ -1509,6 +1707,33 @@ export function createConversationV4Gateway(
         persistedMessages: activated.persistedMessages,
       };
     },
+    /**
+     * 视图冷物化的裸读面（ruling 2）：只判持久层存在性 + 尾读，**绝不**激活 runtime。
+     *
+     * 尾读刻意与 `activateSessionForResume` 共用同一个 `readPersistedSessionMessages`
+     * （messagesTail limit=500）：hydrate 的 store 窄面**拒绝** messagesTail 而回落全量
+     * `messages()`（见 buildMaterializationStore 的 perf 注释），两者对 >500 part 的会话会
+     * 数出不同的 turn 序号（合成事件按 `hydrate-turn-${turnNumber}` 命名），于是"有没有先
+     * activation"会改变 rowId。视图路径必须喂给三源合并与 resume 逐字相同的那一份尾读。
+     */
+    readColdViewMaterial: async (sessionId) => {
+      const persisted = await context.deps.sessionStore?.getSession(sessionId as SessionId);
+      if (!persisted) {
+        // 与 resumePersistedSession 的同名分支逐字对齐：持久层查不到就是 notFound，由协调器
+        // 翻成 V4SubscribeSessionUnavailableError——renderer 的错误块无需知道走的是哪条路径。
+        context.logger?.warn("ZCode Protocol v4 cold view material has no persisted session", {
+          activeSessionCount: context.sessions.size,
+          event: "zcode_protocol.v4.view_material_missing",
+          module: "bootstrap.zcode_protocol",
+          sessionId,
+        });
+        return { status: "notFound" };
+      }
+      return {
+        status: "available",
+        persistedMessages: await readPersistedSessionMessages(context, sessionId),
+      };
+    },
     emitWireFrame: (wire) =>
       context.notify({
         method: V4_NOTIFICATIONS.conversationFrame,
@@ -1533,7 +1758,10 @@ export function createConversationV4Gateway(
     getSessionMemoryEnabled: (sessionId) => context.sessions.get(sessionId)?.memoryEnabled,
     getSessionConfigSeed: (sessionId) => {
       const record = context.sessions.get(sessionId);
-      if (!record) return null;
+      // 视图冷物化：没有 runtime 就没有"当前真值"，只能用 loadPersistedEvents 刚写下的持久
+      // 派生种子（模型选型 + mode）；两者都无从派生时返回 null，gateway 跳过注入，投影保留
+      // 默认值——绝不为了"看起来有值"而伪造档位清单或 planEnabled。
+      if (!record) return coldViewConfigSeeds.get(sessionId) ?? null;
       const selection =
         record.app.runtime.getSessionModelSelection() ?? record.restoredModelSelection;
       return {
@@ -1690,7 +1918,7 @@ export function createConversationV4Gateway(
       return record.app.resolvePromptAttachmentPreviewSource(input);
     },
     getConversationFileChanges: async (sessionId, _targetRowId, messageIds, targetTurnId) => {
-      const record = await resolveConversationBackingRecord(context, sessionId);
+      const record = (await resolveConversationBacking(context, sessionId)).record;
       if (!record) {
         throw new Error(`fault.fileChanges.sessionNotFound: ${sessionId}`);
       }
@@ -1794,24 +2022,24 @@ export function createConversationV4Gateway(
       // 复制进 session store 来播种 actor 会话，
       // 这段前缀正属于此类，于是侧栏 actor transcript 只剩本次 live 增量；
       // 普通崩溃恢复后 warm 窗口同样看不到 crash 前的 actor 消息。
-      // 改用 resolveConversationBackingRecord：child 自身没有 record 时按持久
+      // 改用 resolveConversationBacking：child 自身没有 record 时按持久
       // parentID 落到父 record，只借它的共享 event/artifact store，事件读取仍显式用
       // child 自己的 sessionId（script workflow child runtime 共享父 event store，
       // 事件按 child sessionId 归档），因此 sourceEventSeq 仍是 child 的真实水位。
       // 代价：contextWindow 分母会按父 record 的当前模型解析而不是 actor 模型，纯展示层偏差。
-      const record = await resolveConversationBackingRecord(context, sessionId);
+      const backing = await resolveConversationBacking(context, sessionId);
+      const record = backing.record;
       if (!record) {
-        // 诊断：hydrate 预期在 runtime 已由 cold-resume 激活后执行；连父 record 兜底
-        // 都落空时，返回空事件会把真实的生命周期竞态伪装成“历史为空”，必须留下明确现场。
-        context.logger?.warn("ZCode Protocol v4 hydrate has no active runtime", {
-          activeSessionCount: context.sessions.size,
-          event: "zcode_protocol.v4.hydrate_runtime_missing",
-          module: "bootstrap.zcode_protocol",
-          phase: "loadPersistedEvents",
-          sessionId,
-        });
-        return { events: [], synthesized: false, sourceEventSeq: 0 };
+        // record-less 分支（ruling 2）：视图冷物化——不激活 runtime 的只读打开——走这里；
+        // detached live child 在父 record 也消失时同样落到这里。缺席的读取面逐项报给
+        // gateway（deferredColdSources），由它在 view→READY 升级时强制一次原子重建收敛。
+        //
+        // 旧行为是 warn + 返回空事件，那把「hydrate 必然发生在 activation 之后」当成不变量；
+        // 拆分之后 record-less 是**预期**状态，返回空事件才会真的把历史渲染成空会话。
+        return loadPersistedEventsWithoutRecord(sessionId, backing.workspaceId, persistedMessages);
       }
+      // record 在册：runtime 真值优先，视图阶段写下的持久派生种子必须作废。
+      coldViewConfigSeeds.delete(sessionId);
       // message/part 与 session_entry 的异步读取期间 live sink 仍可收到新事件。
       // gateway 必须知道 memory eventStore 取快照时的 raw cursor，才能只补 await 窗口内
       // 的尾部，并把 transcript 合成的 1..N 序列稳定映射回后续 runtime raw seq。
@@ -1882,36 +2110,12 @@ export function createConversationV4Gateway(
           ...(cachePlan.liveEventTypes ? { liveEventTypes: cachePlan.liveEventTypes } : {}),
         });
       }
+      const materializationStore = buildMaterializationStore();
       const source = await loadPersistedConversationMaterialization({
         memoryEvents: events,
         persistedMessages,
         sessionId,
-        ...(store
-          ? {
-              store: {
-                getSession: (id) => store.getSession(id),
-                messages: (input) => store.messages(input),
-                // perf: hydrate 路径不能走 messagesTail —— 裸尾部读（按 part 截断）
-                // 对 revert/fork 会话选择不出版本正确的活跃分支（实测 2703-part 会话
-                // 被截成 6 条消息 → 空会话）。resume 路径已提供等价且分支正确的
-                // persistedMessages；只有它缺席时才回落全量读取，行为与修复前一致。
-                readTarget: (input) => store.readTarget(input),
-                ...(store.sessionEntries
-                  ? {
-                      sessionEntries: (input) =>
-                        store.sessionEntries!(input).catch((error) => {
-                          context.logger?.warn("v4 hydrate session entries read failed", {
-                            error: error instanceof Error ? error.message : String(error),
-                            event: "zcode_protocol.v4.hydrate_session_entries_failed",
-                            module: "bootstrap.zcode_protocol",
-                          });
-                          return [];
-                        }),
-                    }
-                  : {}),
-              },
-            }
-          : {}),
+        ...(materializationStore ? { store: materializationStore } : {}),
       });
       // live ModelComplete.fileChanges 只存在于内存事件；cold merge 以持久
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
@@ -1949,23 +2153,7 @@ export function createConversationV4Gateway(
           ? { target: source.target }
           : {}),
       });
-      for (const diagnostic of merged.diagnostics) {
-        const fields = {
-          ...diagnostic,
-          event: "zcode_protocol.v4.hydrate_three_source_merge",
-          module: "bootstrap.zcode_protocol",
-          sessionId,
-        };
-        if (
-          diagnostic.code === "cold_merge.ambiguous_legacy_turn_preserved" ||
-          diagnostic.code === "cold_merge.memory_boundary_preserved" ||
-          diagnostic.code === "cold_merge.unclassified_event_preserved"
-        ) {
-          context.logger?.warn("v4 hydrate preserved ambiguous cold fact", fields);
-        } else {
-          log?.debug("v4 hydrate merged duplicate cold facts", fields);
-        }
-      }
+      logColdMergeDiagnostics(sessionId, merged.diagnostics);
       // transcript 可恢复 Agent row，却不能证明 child session 已经落库。
       // 这里在 gateway 的 raw-event buffer 补回前生成校验种子，既排除旧幽灵引用，
       // 又避免异步查询覆盖 seed 之后新到达的 live spawn/stop。

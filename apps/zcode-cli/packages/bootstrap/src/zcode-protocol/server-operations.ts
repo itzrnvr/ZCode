@@ -3537,7 +3537,12 @@ export function hasMessagesTail(
   return "messagesTail" in store && typeof store.messagesTail === "function";
 }
 
-async function readPersistedSessionMessages(
+/**
+ * 会话的裸尾读（500 行界）。导出只为 v4 视图冷物化（`readColdViewMaterial`）复用同一份
+ * 尾读约定：视图路径不激活 runtime，却必须拿到与 `app.resume({persistedMessages})`
+ * 逐字相同的输入，否则投影会在「有没有先 activation」两种时序下分叉。
+ */
+export async function readPersistedSessionMessages(
   context: ZCodeProtocolAgentServerContext,
   sessionId: string,
 ): Promise<MessageWithParts[]> {
