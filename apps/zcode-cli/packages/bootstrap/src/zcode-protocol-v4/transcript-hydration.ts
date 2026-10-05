@@ -754,6 +754,15 @@ function synthesizeToolPart(
     part.state.status === "running" ||
     part.state.status === "completed" ||
     part.state.status === "error";
+  // 持久 part 上的真实起止时间是跨进程事实，合成事件必须带上它：row 的 startedAt/endedAt 直接
+  // 取事件时间戳（product-projection-bash-progress.ts:27、product-projection.ts:2966），
+  // 而 push 的缺省时间戳是 `baseMs + seq`（:1558）——不带就折出 1~3ms 的"工具耗时"
+  // （seq 差值），与 live 路径的真实耗时对不上。缺时间（pending）时保持 undefined，
+  // 让它继续走缺省，绝不塞 0（那会把行挪到 1970）。
+  const startedAtMs =
+    "time" in part.state && typeof part.state.time.start === "number"
+      ? part.state.time.start
+      : undefined;
   if (started) {
     push(
       SessionEventType.ToolCallStarted,
@@ -761,13 +770,10 @@ function synthesizeToolPart(
         toolCallId,
         toolName: part.tool,
         ...(persistedMetadata?.display ? { display: persistedMetadata.display } : {}),
-        startedAt: new Date(
-          "time" in part.state && typeof part.state.time.start === "number"
-            ? part.state.time.start
-            : 0,
-        ),
+        startedAt: new Date(startedAtMs ?? 0),
       },
       turnId,
+      startedAtMs,
     );
   }
 
@@ -789,6 +795,7 @@ function synthesizeToolPart(
         },
       },
       turnId,
+      part.state.time.end,
     );
     return { resultType: "success", toolCallCount: 1 };
   }
@@ -809,6 +816,7 @@ function synthesizeToolPart(
         },
       },
       turnId,
+      part.state.time.end,
     );
     return { resultType: "success", toolCallCount: 1 };
   }
