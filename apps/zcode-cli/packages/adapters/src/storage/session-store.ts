@@ -49,3 +49,36 @@ export type {
   AsyncSqliteMigrationOptions,
   SqliteMigrationProgress,
 } from "./session-store/migration-runner.js";
+
+// 会话库的世代备份住在 adapters（而不是 bootstrap）：它操作的是**存储层的文件**，
+// 用的是 sqlite 自己的 VACUUM INTO，和 Electron / 协议层都没有关系，因此可以在纯 node
+// 下用真库做 round-trip 回归。bootstrap 只负责决定 "什么时候跑" 与 "库在哪"。
+export {
+  createSnapshot,
+  DEFAULT_GENERATIONS,
+  DEFAULT_INTERVAL_MS,
+  DEFAULT_LOCK_STALE_MS,
+  DEFAULT_STARTUP_DELAY_MS,
+  listSnapshots,
+  readSourceSignature,
+  restoreSnapshot,
+  RECOVERY_NOTE_FILE,
+  runVacuumIntoWorker,
+  scheduleSessionDatabaseBackups,
+} from "./session-store/database-backups.js";
+export type {
+  CreateSnapshotOptions,
+  FileMark,
+  RestoreSnapshotOptions,
+  RestoreSnapshotResult,
+  ScheduleSessionDatabaseBackupsOptions,
+  SessionDatabaseBackupHandle,
+  SessionDatabaseBackupTimer,
+  SnapshotInfo,
+  SnapshotManifest,
+  SnapshotManifestEntry,
+  SnapshotResult,
+  SnapshotSkipReason,
+  SourceSignature,
+  VacuumIntoRunner,
+} from "./session-store/database-backups.js";
