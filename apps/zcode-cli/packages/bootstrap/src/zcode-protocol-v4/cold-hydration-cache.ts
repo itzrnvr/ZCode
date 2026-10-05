@@ -22,26 +22,40 @@
  * reducer 折叠出的行逐字节一致（实测 834 vs 834 完全相同，含 rowId）。所以这条路径不改
  * 变 rowId 的任何语义，也不碰冻结的 wire schema。
  *
- * ## 什么时候可以命中：活事件里只允许 resume 生命周期
+ * ## 什么时候可以命中：活事件里只允许 resume 每次冷开重新追加的那几类
  *
  * #42 的第一版门槛是"活事件条数 === 0"。那条门槛在真实冷开上**永远判否**：冷开先
  * `record.app.resume()`，而 `resumeFromStore` 会往同一个内存 event store 追加
  * `SessionResumed`（core/runtime/methods/resume.ts:253）与带标题时的 `SessionTitleUpdated`
- * （:352），随后 hydration 才来读这份 store（v4-gateway.ts:2907-2913 → v4-bridge.ts:1805）。
- * 沙箱日志里冷开的 `sourceEventSeq=2` 就是这两条。于是 #42 的缓存从未真正读写过一次。
+ * （:352），随后 hydration 才来读这份 store。沙箱日志里冷开的 `sourceEventSeq=2` 就是这两条。
+ * 于是 #42 的缓存从未真正读写过一次。
  *
- * 修正后的门槛（`classifyColdHydrationLiveEvents`）：活事件只允许是**resume 每次重新追加的
- * 生命周期事件**（`COLD_HYDRATION_LIVE_OVERLAY_EVENT_TYPES`）。这三条理由都是承重的：
+ * #43 放行这两类之后，真实冷开上还剩**一个**类型在挡路：`CheckpointCreated`。
+ * resume.ts:191 的 `restoreWorkspaceCheckpointEntries` 会把持久 entry
+ * （`runtime/workspace_checkpoint`）重放回内存 event store，凡是历史上改过文件的会话都带它
+ * （沙箱实测 93 消息 / 395 part 的会话：marker `liveEventTypes=["checkpoint_created"]` 整条绕过）。
  *
- * 1. 这类事件在合并里**只走尾部补充**（`MEMORY_ONLY_EVENT_TYPES` → trailing supplements，
- *    cold-event-merge.ts:881-884），不参与 turn 权威判定（`memoryAuthorityTurnIds` 只看
+ * 修正后的门槛（`classifyColdHydrationLiveEvents`）：活事件只允许是**resume 每次冷开重新追加、
+ * 且能被尾部补充复原**的类型（`COLD_HYDRATION_LIVE_OVERLAY_EVENT_TYPES`）。四条理由都是承重的：
+ *
+ * 1. 这类事件在合并里**只走尾部补充**：生命周期事件是 `MEMORY_ONLY_EVENT_TYPES` → supplements；
+ *    `CheckpointCreated` 三个分类集合都不在，落 unclassified 兜底 → supplements
+ *    （cold-event-merge.ts:935-938）。都不参与 turn 权威判定（`memoryAuthorityTurnIds` 只看
  *    TurnStarted/TurnComplete，:277-314）、不做 turn 边界插入（`durableBoundaryKeyForEvent`
- *    只认 compaction/fork/goal，:488-507）、不进 hook 归类。所以合并结果 =
- *    `resequence([...durableEvents, ...lifecycle])`，可以被**同一段收尾代码**
+ *    只认 compaction/fork/goal，:500-519）、不进 hook 归类，也**不按位置淘汰**（对照
+ *    `FollowupModeChanged`：只留最后一条，其余在 :901-913 被压掉；`ModelSelected`：
+ *    transcript-derived，:931-933 整条压掉——这两类因此永远不能进白名单，命中路径贴回整份
+ *    overlay 会复活被压掉的事件，"命中 = 未命中"当场破）。所以合并结果 =
+ *    `resequence([...durableEvents, ...live])`，可以被**同一段收尾代码**
  *    （cold-event-merge.ts `finalizeColdConversationEvents`）在命中路径逐字节复原。
- * 2. 它的**重数**每次 resume 都 +1，因此绝不能进缓存载荷（会让第二次开就错），也绝不能进
- *    指纹（否则每次 resume 都自失效，永远命中不了）。命中路径用当前 live 的那一份现贴。
- * 3. 零活事件仍然走 `coldHydrationCacheable(0)`：语义完全一致，只是不再是唯一入口。
+ * 2. 生命周期事件的**重数**每次 resume 都 +1，因此绝不能进缓存载荷（会让第二次开就错），也绝不能
+ *    进指纹（否则每次 resume 都自失效，永远命中不了）。命中路径用当前 live 的那一份现贴。
+ * 3. `CheckpointCreated` 不一样：它经 `buildColdFileChangeSummaries` 变成合成事件里的 `fileChanges`
+ *    （transcript-hydration.ts:1831, :1936），也就是**载荷本身**；而它的持久来源是不推进水位的
+ *    session entry。所以它必须把内容指纹进键（`coldHydrationCheckpointDigest`）——集合逐次相同
+ *    （按 checkpointId 去重、保留原 sequenceNumber），因此不会自失效，却能在真的多了一条
+ *    checkpoint 时立刻 miss。
+ * 4. 零活事件仍然走 `coldHydrationCacheable(0)`：语义完全一致，只是不再是唯一入口。
  *
  * 其他任何活事件（turn 事件、hook、boundary、`RewindTriggered`、`PermissionRequested`
  * 之类的 memory-only、以及 workflow journal 重放）一律整条绕过：宁可多读一次，也不能拿一份
@@ -77,14 +91,21 @@
  * 键是"参与合成的非 transcript 输入"的完整 JSON（不是哈希：漏一个输入就等于可能返回错
  * 内容，字符串全等是一眼可审的）。`session.time_updated` 由 `touchSession` 在**每次
  * message/part 写入**时推进（saveMessage / savePart 都调它），一次主键读 0.006ms。session
- * entry 不走 `touchSession`，所以合成用到的 entry 一类不落：`goalVerificationEntries` 与
- * `sharedContextEntry`（v4/shared_context_import 的原始 data）都在指纹里。任何一项对不上就是
- * miss，回落全量路径——缓存只会让人变慢，绝不会返回错内容。
+ * entry 不走 `touchSession`，所以合成用到的 entry 一类不落：`goalVerificationEntries`、
+ * `sharedContextEntry`（v4/shared_context_import 的原始 data）与 `workspaceCheckpoints`
+ * （checkpoint 的内容指纹）都在键里。
+ * 另有一项不是 store 事实而是**读取范围**：`transcriptScope`。尾读（500 part）与全量读在同一
+ * 水位下会合成出不同的行（`test/cold-event-merge.test.ts:185-223` 钉住了这一点），
+ * 不进键就会让尾读写下的载荷被全量路径命中。
+ * 任何一项对不上就是 miss，回落全量路径——缓存只会让人变慢，绝不会返回错内容。
  *
  * 进程内缓存：不开新文件、不改 schema、不写用户数据。代价是重启后首次打开仍是 miss。
  */
 
 import { SessionEventType, type SessionEvent } from "@zcode/contracts";
+
+/** 合成消费的 transcript 范围：resume/视图路径交下来的 500-part 尾读，或 materialization 自己的全量回落。 */
+export type ColdHydrationTranscriptScope = "tail-500" | "full";
 
 export interface ColdHydrationFingerprintInput {
   contextWindow: number | undefined;
@@ -99,8 +120,23 @@ export interface ColdHydrationFingerprintInput {
   sharedContextEntry: unknown;
   targetUpdatedAt: number | undefined;
   title: string | null | undefined;
+  /**
+   * 合成消费了哪一份 transcript。同一水位下两种范围产出的行**不同**：resume（与视图冷物化）
+   * 交下来的 500-part 尾读，vs materialization 自己回落的全量读——bridge 的 store 窄面刻意
+   * 不转发 messagesTail（commit f141156：裸尾读对 revert/fork 会话选不出版本正确的活跃分支，
+   * 实测 2703-part 会话被截成 6 条消息 → 空会话）。
+   * `test/cold-event-merge.test.ts:185-223` 把这两种结果钉成了不同的 messageId 列表，
+   * 所以范围必须进键：否则尾读写下的载荷会被全量路径命中，那是错行，不是慢。
+   */
+  transcriptScope: ColdHydrationTranscriptScope;
   /** session.time.updated —— transcript 水位。 */
   transcriptWatermark: number | undefined;
+  /**
+   * 活事件里 CheckpointCreated 的内容指纹（见 `coldHydrationCheckpointDigest`）。checkpoint 的
+   * 持久来源是 session entry（`runtime/workspace_checkpoint`），而 entry 不推进水位，
+   * 只靠 `transcriptWatermark` 盖不住它——它却经 file-change 摘要进了缓存载荷本身。
+   */
+  workspaceCheckpoints: readonly string[];
 }
 
 export function coldHydrationFingerprint(input: ColdHydrationFingerprintInput): string {
@@ -113,7 +149,53 @@ export function coldHydrationFingerprint(input: ColdHydrationFingerprintInput): 
     input.contextWindow ?? null,
     input.goalVerificationEntries,
     input.sharedContextEntry ?? null,
+    input.transcriptScope,
+    input.workspaceCheckpoints,
   ]);
+}
+
+/**
+ * 活事件里 CheckpointCreated 的**内容指纹**（进缓存键的那一份）。
+ *
+ * 为什么必须进键：checkpoint 不是纯粹的尾部补充——它经 `buildColdFileChangeSummaries`
+ * （cold-file-change-summaries.ts:42-50, :215-264）变成合成事件里的 `fileChanges`
+ * （transcript-hydration.ts:1831, :1936），也就是**缓存载荷本身**；而它的持久来源是
+ * session entry，entry 不推进 `session.time_updated`。少了这一项，"写缓存时还没有 checkpoint、
+ * 命中时已经有了"就会返回一份缺文件摘要的行——正是文件头说的"拿过期的 artifact 摘要冒充权威"。
+ * 预热侧同理：warm 没有 runtime，永不 restore checkpoint（digest 恒为空），真实冷开有，
+ * 两者因此天然分键，warm 那份无摘要的载荷不可能被真实打开命中。
+ *
+ * 字段取到刚好等于 `buildColdFileChangeSummaries` 的消费面：scope 过滤、snapshotRef（artifact
+ * 寻址）、targetMessageId ?? messageId（分组键），加 sequenceNumber（聚合顺序 = 同一轮写入顺序，
+ * first-before → final-after 依赖它）。多取一个字段就多一种自失效，少取一个就可能命中错行。
+ *
+ * 排序让键只依赖**集合**：restore 按 (data.sequenceNumber, time.created) 重放并按 checkpointId
+ * 去重（workspace-checkpoint-persistence.ts:134-158），append 保留显式 seq
+ * （in-memory-session-event-store.ts:61-67），所以同一集合不可能有两种重放顺序，无需保序。
+ * 防御式读字段、绝不抛：一条畸形活事件只能让这次不缓存，不能打断 hydration。
+ */
+export function coldHydrationCheckpointDigest(events: readonly SessionEvent[]): string[] {
+  const digest: string[] = [];
+  for (const event of events) {
+    if (event.type !== SessionEventType.CheckpointCreated) continue;
+    digest.push(
+      [
+        event.sequenceNumber,
+        payloadString(event.payload, "checkpointId"),
+        payloadString(event.payload, "scope"),
+        payloadString(event.payload, "snapshotRef"),
+        payloadString(event.payload, "targetMessageId") ?? payloadString(event.payload, "messageId"),
+      ].join("|"),
+    );
+  }
+  return digest.sort();
+}
+
+/** 与 cold-event-merge.ts:275 同形的模块私有读法（本仓惯例：不导出共享 util）。 */
+function payloadString(payload: unknown, key: string): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : null;
 }
 
 // 载荷形状由调用方拥有（bridge 用它自己的具名类型），这里只做键控存取，不猜结构。
@@ -141,6 +223,17 @@ export function coldHydrationCacheable(liveEventCount: number): boolean {
 export const COLD_HYDRATION_LIVE_OVERLAY_EVENT_TYPES: ReadonlySet<SessionEventType> = new Set([
   SessionEventType.SessionResumed,
   SessionEventType.SessionTitleUpdated,
+  // 冷开必然带它：resume.ts:191 → restoreWorkspaceCheckpointEntries 把持久 entry 重放回内存
+  // event store（按 checkpointId 去重、保留原 sequenceNumber 与原 timestamp）。沙箱实测
+  // 93 消息 / 395 part 的会话就因为它整条绕过（2026-10-05 05:02:51 marker:
+  // liveEventTypes=["checkpoint_created"]）——它是真实冷开上唯一还在挡路的类型。
+  // 尾部可复原：它在 merge 里既不是 hook、不是 durable boundary（cold-event-merge.ts:500-519
+  // 只认 compaction/fork/goal）、不是 memory-only、也不是 transcript-derived，只落 unclassified
+  // 兜底 → supplements（:935-938），与生命周期事件同一个去处，命中路径现贴即逐字节相同。
+  // usageSeed 不受影响：reducer 只写 lastCheckpoint/updatedAt（event-reducer.ts:152-170），
+  // 不碰 contextUsed（只有 ModelComplete）也不碰 contextWindow（只有 SessionCreated）。
+  // 载荷**受**影响，所以它的内容进指纹：见 coldHydrationCheckpointDigest。
+  SessionEventType.CheckpointCreated,
 ]);
 
 export type ColdHydrationLiveEvents =

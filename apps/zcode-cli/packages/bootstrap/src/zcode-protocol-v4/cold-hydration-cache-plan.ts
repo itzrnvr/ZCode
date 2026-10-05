@@ -11,8 +11,15 @@
 // 3. 写前复核：合成期间指纹输入被并发写入改变就不写（seqlock）。
 //
 // 这里只做判定与组装，不碰 runtime：指纹读三个 store 主键面（getSession/readTarget/
-// sessionEntries），与 v4-bridge.ts:1826-1842 逐项同口径；`contextWindow` 由调用方解好传进来，
-// 保证指纹与合成/usageSeed 用的是同一个值。
+// sessionEntries），与 v4-bridge.ts 的 hydration 逐项同口径；`contextWindow` 与 `transcriptScope`
+// 都由调用方解好传进来，保证指纹与合成/usageSeed 用的是同一份输入。本模块因此**天生不依赖
+// record**：record-less 的视图冷物化只要传得出一档位就能用同一套判定（传不出就按
+// context-window-unresolved 整条绕过，绝不伪造 20 万）。
+//
+// 视图路径当前刻意不参与缓存（v4-bridge.ts 的 loadPersistedEventsWithoutRecord 在判定之前就返回）：
+// 它的档位来自另一条推导（resolvePersistedSessionModelContextWindow），与 record 路径不同时键就
+// 永不可达，相同时又与升级后那次重建写的条目重复；而缓存只有 16 格 LRU
+// （cold-hydration-cache.ts:126），塞进不可达条目会挤掉可达的。要改这条决定，先回答这三点。
 //
 // 命中路径的最终事件 = 缓存里的 durable 合成结果 + 当前 live overlay，经
 // `finalizeColdConversationEvents`（cold-event-merge.ts，与 miss 路径同一段收尾）重排，
@@ -26,8 +33,10 @@ import {
 } from "./cold-event-merge.js";
 import {
   classifyColdHydrationLiveEvents,
+  coldHydrationCheckpointDigest,
   coldHydrationFingerprint,
   readColdHydrationCache,
+  type ColdHydrationTranscriptScope,
 } from "./cold-hydration-cache.js";
 import type { SessionUsageSeed } from "./product-projection.js";
 import { goalVerificationEntriesFromSessionEntries } from "./transcript-hydration.js";
@@ -117,6 +126,12 @@ export interface ColdHydrationCachePlanInput {
   events: readonly SessionEvent[];
   sessionId: string;
   store: ColdHydrationCacheStore | undefined;
+  /**
+   * 合成将消费哪一份 transcript，由调用方按 materialization 自己的那个分支给出
+   * （cold-event-merge.ts:86-88：`persistedMessages?.length` 非空即用尾读，否则回落全量）。
+   * 判据必须与 materialization 逐字相同，否则键描述的输入就不是真正被合成的输入。
+   */
+  transcriptScope: ColdHydrationTranscriptScope;
 }
 
 export async function planColdHydrationCache(
@@ -180,7 +195,11 @@ async function readFingerprint(input: ColdHydrationCachePlanInput): Promise<stri
     sharedContextEntry: sharedContextEntryData(entries),
     targetUpdatedAt: target?.time.updated,
     title: session?.title ?? null,
+    transcriptScope: input.transcriptScope,
     transcriptWatermark: session?.time.updated,
+    // checkpoint 的内容指纹从**这批活事件**推出来，不额外读 entry：它要钉住的正是
+    // buildColdFileChangeSummaries 的输入，而那份输入就是这里的 input.events。
+    workspaceCheckpoints: coldHydrationCheckpointDigest(input.events),
   });
 }
 

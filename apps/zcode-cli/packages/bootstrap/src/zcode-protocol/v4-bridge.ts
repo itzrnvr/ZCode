@@ -38,7 +38,10 @@ import {
   mergeColdConversationEvents,
   type ColdEventMergeResult,
 } from "../zcode-protocol-v4/cold-event-merge.js";
-import { writeColdHydrationCache } from "../zcode-protocol-v4/cold-hydration-cache.js";
+import {
+  writeColdHydrationCache,
+  type ColdHydrationTranscriptScope,
+} from "../zcode-protocol-v4/cold-hydration-cache.js";
 import {
   COLD_HYDRATION_CACHE_LOG,
   isColdHydrationCacheFingerprintCurrent,
@@ -2061,20 +2064,29 @@ export function createConversationV4Gateway(
       // 66.5MB 里 98.8% 从未变成行。缓存**合成结果**（1.63MB）后命中路径只剩 8ms 解析 +
       // 33ms 折叠；折叠照旧发生，所以 rowId 契约不变（实测 834 vs 834 逐字节一致）。
       //
-      // 门槛（#42 修正）：活事件只允许是 **resume 每次重新追加的生命周期事件**。冷开必然先
-      // resume，而 resumeFromStore 会把 SessionResumed（core/runtime/methods/resume.ts:253）
-      // 与带标题时的 SessionTitleUpdated（:352）写进同一个内存 event store，hydration 随后才
-      // 读到它们（沙箱日志里冷开 sourceEventSeq=2 就是这两条）——所以 #42 的"活事件数为 0"
-      // 门槛在真实冷开上永远判否，缓存从未被读写过一次。这类事件只走合并的尾部补充，命中时
-      // 由 finalizeColdConversationEvents 用当前这一份现贴，因此"命中 = 未命中"。
+      // 门槛（#42 修正、issue #4 收口）：活事件只允许是 **resume 每次冷开重新追加的事件**——
+      // SessionResumed（core/runtime/methods/resume.ts:253）、带标题时的 SessionTitleUpdated（:352），
+      // 以及 resume.ts:191 从持久 entry 重放回来的 CheckpointCreated。少了最后这一类，真实冷开
+      // 仍然整条绕过（沙箱实测 93 消息 / 395 part 的会话：marker liveEventTypes=["checkpoint_created"]）。
+      // 这三类都只走合并的尾部补充，命中时由 finalizeColdConversationEvents 用当前这一份现贴，
+      // 因此"命中 = 未命中"；checkpoint 另外把内容指纹进键（它会经 file-change 摘要进载荷，
+      // 而它的持久来源是不推进水位的 session entry）。
       // 其余任何活事件（turn/hook/boundary/RewindTriggered/workflow 重放）一律整条绕过。
       // 判定与指纹在 cold-hydration-cache-plan.ts，可被真实 resume→hydrate 顺序驱动测试。
       const contextWindow = resolveSessionModelContextWindow(context, record);
+      // 与 materialization 自己那个分支同一个判据（cold-event-merge.ts:86-88）：有尾读就用尾读，
+      // 没有就回落全量（buildMaterializationStore 刻意不转发 messagesTail，见 f141156）。
+      // 两者在同一水位下会合成出不同的行，所以必须分键——否则尾读写的载荷会被全量路径命中。
+      // 判定与写前复核必须用同一个值，否则复核永远对不上。
+      const transcriptScope: ColdHydrationTranscriptScope = persistedMessages?.length
+        ? "tail-500"
+        : "full";
       const cachePlan = await planColdHydrationCache({
         contextWindow,
         events,
         sessionId,
         store,
+        transcriptScope,
       });
       if (cachePlan.kind === "hit") {
         logColdHydrationCache(context, sessionId, {
@@ -2166,7 +2178,7 @@ export function createConversationV4Gateway(
       // 不含 resume 生命周期事件——它们每次冷开都会重新追加，写进载荷第二次开就错。
       // 写前复核指纹（seqlock）：合成期间输入被并发写入改变时不写，宁可这次不缓存。
       if (cachePlan.kind === "miss") {
-        const planInput = { contextWindow, events, sessionId, store };
+        const planInput = { contextWindow, events, sessionId, store, transcriptScope };
         if (
           await isColdHydrationCacheFingerprintCurrent({
             ...planInput,
