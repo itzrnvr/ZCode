@@ -43,6 +43,7 @@ import {
 import { createModelAdapter } from "../model-factory.js";
 import { StartupTimer, startupNow } from "../startup-logging.js";
 import { scheduleStartupLogRetentionCleanup } from "../log-retention.js";
+import { scheduleStartupSessionDatabaseBackups } from "../session-db-backups.js";
 import type {
   PrepareUserExecutionBoundary,
   ResumeOptions,
@@ -59,6 +60,7 @@ import { getCliStorageRoot, getModelIoDir, projectIdFromDirectory } from "./path
 import {
   asInputHistoryStore,
   asLocalSettingStore,
+  getSessionDbPath,
   openStartupSessionStore,
   readProjectPermissionMode,
   readSessionModelSelection,
@@ -828,6 +830,15 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       workingDirectory,
     });
     scheduleStartupLogRetentionCleanup(loggerFactory, logger);
+    // 只有**自己打开**库的进程才排备份（桌面端会把 store 注进来，那条路由 app-server
+    // 统一排；两边都排的话只会多一条 skipped/in_flight，但没必要）。
+    // 与 log retention 同一位置：启动计时完成之后，不把这些开销算进冷启动。
+    const sessionDbBackups = ownsSessionStore
+      ? scheduleStartupSessionDatabaseBackups({
+          dbPath: getSessionDbPath(configResult),
+          logger,
+        })
+      : undefined;
     const inputFacade = createInputFacade({
       artifactStore,
       customCommandPromptResolver: async (text, resolverOptions) => {
@@ -1147,6 +1158,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       },
       ...sessionFacade,
       close: async () => {
+        // 备份定时器先取消：库关闭之后不该再有 VACUUM INTO 去读它。
+        sessionDbBackups?.cancel();
         try {
           await closeSession?.();
         } finally {

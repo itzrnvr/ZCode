@@ -29,6 +29,8 @@ import {
 import { closeSessionStore, getSessionDbPath } from "./app/session-store.js";
 import { startProcessProviderRegistryRuntime } from "./app/process-provider-registry-runtime.js";
 import { scheduleStartupLogRetentionCleanup } from "./log-retention.js";
+import type { SessionDatabaseBackupHandle } from "@zcode/adapters/storage";
+import { scheduleStartupSessionDatabaseBackups } from "./session-db-backups.js";
 import { StartupTimer, startupNow } from "./startup-logging.js";
 import { installZCodeProtocolAiSdkWarningLogger } from "./zcode-protocol/ai-sdk-warning-logger.js";
 import {
@@ -133,6 +135,7 @@ export async function runZCodeProtocolAgent(
   let providerRegistryRuntime:
     | Awaited<ReturnType<typeof startProcessProviderRegistryRuntime>>
     | undefined;
+  let sessionDbBackups: SessionDatabaseBackupHandle | undefined;
   try {
     // 数据库准备先于账号、Registry 和遥测，不把远端材料等待混进迁移门禁。
     const configResult = createConfig({ env: options.env });
@@ -343,6 +346,12 @@ export async function runZCodeProtocolAgent(
       stage: "total",
     });
     scheduleStartupLogRetentionCleanup(loggerFactory, logger);
+    // 库已经打开且迁移完成（:139 是第一个启动资源），此时才排备份：备的是迁移后的库。
+    // 放在 startupTimer.complete 之后，6 s 量级的 VACUUM INTO 不会混进启动耗时里。
+    sessionDbBackups = scheduleStartupSessionDatabaseBackups({
+      dbPath: getSessionDbPath(configResult),
+      logger,
+    });
     await connection.waitForClose();
   } catch (error) {
     options.lifecycle?.requestShutdown(
@@ -355,6 +364,9 @@ export async function runZCodeProtocolAgent(
     throw error;
   } finally {
     options.lifecycle?.requestShutdown();
+    // 备份定时器是 unref 的、也不会自己抛，但关闭时明确取消：正在跑的那一轮跑完就停，
+    // 不会在 store 已经关闭之后再对库做 VACUUM INTO。
+    sessionDbBackups?.cancel();
     await cleanupProtocolRuntime({
       logger,
       deadlineAt: options.lifecycle?.deadlineAt,
