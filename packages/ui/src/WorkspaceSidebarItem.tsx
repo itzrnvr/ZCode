@@ -65,6 +65,7 @@ import {
 } from "@zcode/shared";
 import type { ZCodeTaskMeta } from "@zcode/shared";
 import { useBaseWorkspaceServices, useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { useTaskListPrefetchTaskItems } from "@/v4/useTaskListPrefetch.js";
 import {
   applyTaskQueryCacheMutation,
   invalidateTaskQueryCacheByScopes,
@@ -210,6 +211,10 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
   const zcodeTaskService = services.zcodeTaskService;
   const taskItemsRef = useRef(taskItems);
   taskItemsRef.current = taskItems;
+  // 可见行 -> 会话行预取（K=6、串行、idle 调度、交互即让路）。所有策略都在
+  // @/v4/useTaskListPrefetch 与 @/v4/conversationRowsPrefetch 里，本文件只出这一个调用：
+  // 不放排序逻辑、不放 service 查找、不放状态（lane 例外只批了这一行）。
+  useTaskListPrefetchTaskItems(taskItems);
   const workspaceZCodeStateRef = useRef(workspaceZCodeState);
   workspaceZCodeStateRef.current = workspaceZCodeState;
   const findCurrentTaskItem = useCallback((taskId: string) => {

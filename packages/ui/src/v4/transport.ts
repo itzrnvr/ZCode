@@ -18,8 +18,10 @@ import type {
   V4ConversationFileRewindPreviewResult,
   V4ConversationPlansParams,
   V4ConversationPlansResult,
+  V4ConversationRowsParams,
   V4ConversationRowsRangeParams,
   V4ConversationRowsRangeResult,
+  V4ConversationRowsResult,
   V4ConversationWorkflowRunArtifactDataParams,
   V4ConversationWorkflowRunArtifactDataResult,
   V4ConversationWorkflowRunArtifactReadParams,
@@ -60,6 +62,32 @@ export interface ConversationTransport {
   queryCommands(params: CommandsQueryParams): Promise<CommandsQueryResult>;
   /** v4/conversation/rowsRange（loadOlder）：按游标向上取一窗历史行。 */
   rowsRange(params: V4ConversationRowsRangeParams): Promise<V4ConversationRowsRangeResult>;
+  /**
+   * v4/conversation/rows：冷会话首绘的「快绘读」。
+   *
+   * 与 rowsRange 的差别不在形状而在路径：它走 CLI 侧 server.ts 的直接派发
+   * （`bootstrap/src/zcode-protocol/conversation-rows-operation.ts`），不经 requireV4Gateway，
+   * 因此**不触发 activation**。读的是 durable store 在写入时物化好的行
+   * （conv_projection_meta / conv_projection_row），所以：
+   * - 没有任何水位（无 atSeq / atRevision / atLogEpoch）——仓库里不存在持久化的 event
+   *   sequence，logEpoch 又是活 runtime record 的属性。这些行永远不能当 delta base
+   *   （store 要求 frame.fromSeq === snapshot.seq），也永远不能拿去发 fileChanges /
+   *   fileRewindPreview / plans 这类按水位取值的只读查询（ruling 2：它们要 record）。
+   * - 算不出 turnHeader.fileChanges 与由它派生的 actions.canRewindFiles（都要
+   *   buildColdFileChangeSummaries = CheckpointCreated 内存事件 + record.app.readToolResultArtifact），
+   *   也不含 hookInvocation 行。缺席的含义是「还没算出来」，不是「没有改动」。
+   * - `rowId` 是投影计数器，跑过 hook 的会话里与权威 rowId 整体错位；稳定键是 entityId，
+   *   分组键是 turnId（= 持久 user messageId，event-normalizer.ts:220-228）。
+   *
+   * 因此消费方只能整体替换、绝不合并：见 conversationFastRowsLayer.ts。
+   *
+   * 可选成员 = 能力探测。本仓库没有 host.supports 这类面，缺席本身就是探测结果
+   * （同 onRuntimeLifecycle?）。注意 desktop/web 的 service proxy 对任何字符串属性都返回
+   * 一个函数（rpc/src/proxy-channel.ts:110-141），所以旧 host 上「缺席」表现为 RPC 被拒
+   * （CLI default: 分支抛 -32601，server.ts:722-723）而不是 undefined——两条路都收敛到
+   * reason: "unavailable"。
+   */
+  conversationRows?(params: V4ConversationRowsParams): Promise<V4ConversationRowsResult>;
   /** v4/conversation/plans：当前有效分支里的全部终态计划。 */
   plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult>;
   /** v4/conversation/workflowRunEvents：workflow run 的事件日志分页（cursor = journal sequence）。 */

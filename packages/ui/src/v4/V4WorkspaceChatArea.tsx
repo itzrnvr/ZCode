@@ -548,6 +548,20 @@ export function V4WorkspaceChatArea({
     [placementShellBinding],
   );
 
+  // 主 leaf 的 keep-alive 栈必须知道哪些会话已被别的 leaf 承载：同一会话挂两份 pane 会
+  // 让 pane 层副作用重复（数据层能按 topic 共享 store，pane 层不行——onSessionCreated、
+  // 遥测前台归属都是一份 pane 一份）。按 leaf 列表 memo 出稳定引用，否则每次渲染都换一个
+  // 新 Set，会把栈的 effect 打成每帧重跑。
+  const nonPrimarySessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const leaf of layout.leaves) {
+      if (leaf.paneId === V4_PRIMARY_PANE_ID) continue;
+      const boundSessionId = panes[leaf.paneId]?.sessionId;
+      if (boundSessionId) ids.add(boundSessionId);
+    }
+    return ids;
+  }, [layout.leaves, panes]);
+
   return (
     <div ref={containerRef} style={containerStyle} className="relative h-full min-h-0 w-full">
       {layout.leaves.map((leaf) => (
@@ -563,6 +577,9 @@ export function V4WorkspaceChatArea({
           canSplit={canSplit}
           shellWorkspaceKey={shellWorkspaceKey}
           binding={leaf.paneId === V4_PRIMARY_PANE_ID ? null : (panes[leaf.paneId] ?? null)}
+          excludedSessionIds={
+            leaf.paneId === V4_PRIMARY_PANE_ID ? nonPrimarySessionIds : undefined
+          }
           primaryBinding={
             leaf.paneId === V4_PRIMARY_PANE_ID ? (activeGroup?.primaryBinding ?? null) : null
           }

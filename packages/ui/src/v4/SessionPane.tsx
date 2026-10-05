@@ -2195,6 +2195,21 @@ export function SessionPane({
     [sessionId, snapshot?.config, snapshot?.sessionId],
   );
 
+  // ── 快绘（provisional）窗口判定 ──
+  // paneProjectionReady 的口径必须与下面 timelineSnapshot 完全一致（同一份 lease / sessionId
+  // 匹配条件），否则切换会话的那一帧会把旧 lease 的临时行喂给新会话——timelineSnapshot 上方
+  // 那段注释记的就是这个坑。这里提前声明是因为 rowContext 就要用到 provisionalRows，而
+  // timelineSnapshot 声明在几千行之后；下面 timelineSnapshot 改成复用同一个布尔值，
+  // 于是这个判定全组件只有一份。
+  const paneProjectionReady = sessionId !== null && (lease === null || sessionLeaseReady);
+  // durable store 直读的临时行。权威 snapshot 一落地就被 store 在同一个 setState 里原子清空，
+  // 并且该 store 实例此后永久拒绝再播种（后台折叠可能晚于首个 snapshot 才 resolve，
+  // 那时它在时间上更新但不是「更正确」）。
+  const fastRows = paneProjectionReady ? state.fastRows : null;
+  // 临时行在场 = 行级能力降级窗口，清单见 conversationProvisionalAffordances.ts。
+  const provisionalRows =
+    paneProjectionReady && snapshot?.sessionId !== sessionId && fastRows !== null;
+
   const rowContext = useMemo<ConversationRowRenderContext>(
     () => ({
       workspacePath,
@@ -2203,6 +2218,7 @@ export function SessionPane({
       workspaceRemoteSessionId: remoteSessionId ?? undefined,
       modelSelectionView,
       logEpoch: snapshot?.logEpoch,
+      provisionalRows,
       theme,
       codePreviewSettings,
       sessionId,
@@ -2248,9 +2264,17 @@ export function SessionPane({
       workflowRunPendingQuestionsByRunId,
       workflowGraphByToolCallId,
       workflowDraftByToolCallId,
-      fetchFileChanges: handleFetchFileChanges,
-      previewFileRewind: workspaceFileRewindEnabled ? handlePreviewFileRewind : undefined,
-      applyFileRewind: workspaceFileRewindEnabled ? handleApplyFileRewind : undefined,
+      // 快绘窗口：这三个都要水位（baseRevision + baseLogEpoch）或本身是写操作，而临时行
+      // 没有任何水位。缺席即不提供（本仓库既有写法，同 onCancelBackgroundWork 的注释）；
+      // 权威 snapshot 落地后 provisionalRows 变 false，依赖变化会让消费方重新发起正确的那次读取。
+      // fetchFileChanges 是真正关键的一个：不降级时 useAssistantPreviewCardsForRow 会把
+      // SessionPane 的空占位结果按 requestKey 锁死，而 fileChanges.state 在权威投影里同样
+      // optional，键可能一模一样 -> effect 不重跑 -> md/html 预览卡片永久消失。
+      fetchFileChanges: provisionalRows ? undefined : handleFetchFileChanges,
+      previewFileRewind:
+        workspaceFileRewindEnabled && !provisionalRows ? handlePreviewFileRewind : undefined,
+      applyFileRewind:
+        workspaceFileRewindEnabled && !provisionalRows ? handleApplyFileRewind : undefined,
       readAttachment: attachmentRead,
       readAttachmentRange: attachmentReadRange,
     }),
@@ -2261,6 +2285,7 @@ export function SessionPane({
       remoteSessionId,
       modelSelectionView,
       snapshot?.logEpoch,
+      provisionalRows,
       theme,
       codePreviewSettings,
       sessionId,
@@ -3746,20 +3771,25 @@ export function SessionPane({
   });
   // retry 的产品裁决属于行级权威投影。这里仅提供命令能力，入口是否展示
   // 完全读取 row.actions.canRetry，禁止再用 pane phase 形成第二套 guard。
-  const retryActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  // 快绘窗口里不发任何带 rowId 的行级命令：快绘 rowId 是 product-projection 的计数器
+  // （nextRowId++），跑过 hook 的会话会与权威 rowId 整体错位。服务端 resolveRowActionTarget
+  // 要求 rowId 与 entityId 同时命中，错位只会干净地回 proto.staleTarget、不会改错行，
+  // 所以这是 UX 门（别给一个点了就报错的按钮），不是防腐门。
+  const retryActionsEnabled =
+    !provisionalRows && !readOnly && !selectionSideChat && Boolean(sessionId);
   // fork 可用性完全由 row.actions.canFork（CLI stable resolver 投影）裁决；pane 只提供命令回调。
-  const forkActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  const forkActionsEnabled =
+    !provisionalRows && !readOnly && !selectionSideChat && Boolean(sessionId);
   // editUserQuery 已由 command 层防御 latest real user query，并在 running
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
-  const editActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  const editActionsEnabled =
+    !provisionalRows && !readOnly && !selectionSideChat && Boolean(sessionId);
   const isDraft = sessionId === null;
   // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
   // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
   // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
   const timelineSnapshot =
-    !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
-      ? snapshot
-      : null;
+    paneProjectionReady && snapshot?.sessionId === sessionId ? snapshot : null;
   const shareHandoverContext =
     snapshot?.sharedContextImport && "contextId" in snapshot.sharedContextImport
       ? snapshot.sharedContextImport
@@ -4812,7 +4842,7 @@ export function SessionPane({
               scrollToBottomActionRef={timelineScrollToBottomRef}
               scrollToQueryActionRef={timelineScrollToQueryRef}
               selectionPanelLayoutContainerRef={conversationLayoutContainerRef}
-              rows={timelineSnapshot?.rows.window ?? []}
+              rows={timelineSnapshot?.rows.window ?? fastRows?.rows ?? []}
               pendingGuides={timelineSnapshot ? pendingGuideProjection?.pendingGuides : []}
               apiRetry={timelineSnapshot?.control.apiRetry ?? null}
               totalCount={timelineSnapshot?.rows.totalCount ?? 0}

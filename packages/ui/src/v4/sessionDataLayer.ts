@@ -9,6 +9,15 @@ import type { SessionOpenKind } from "@/lib/sessionOpenArmsTelemetry.js";
 import { conversationTopic, type ConversationTransport } from "@/v4/transport.js";
 import { logger } from "@/logger.js";
 import type { CommandsQueryParams, CommandsQueryResult } from "@zcode/shared/zcode-protocol-v4";
+import {
+  conversationRowsPrefetchCache,
+  createConversationRowsFastReader,
+} from "@/v4/conversationRowsFastPath.js";
+// 只从纯调度模块取这一个入口，不从 useTaskListPrefetch（React 胶水）取：
+// 胶水要借 workspaceConnectionRegistry 的连接租约，而注册表自己 import 本文件，
+// 直接 import 胶水会成环。注册点由胶水在惰性创建控制器时回填；注册前调用是 no-op，
+// 语义正好——侧栏还没渲染过，也就没有预取可取消。
+import { notifyTaskListPrefetchOpened } from "@/v4/conversationRowsPrefetch.js";
 
 /** pane 持有的租约；release 幂等。 */
 export interface SessionLease {
@@ -53,6 +62,7 @@ export class SessionDataLayer {
   private readonly keepWarmMs: number;
   private readonly entries = new Map<string, SessionEntry>();
   private readonly offFrame: () => void;
+  private readonly offRuntimeRestart: () => void;
   private disposed = false;
 
   constructor(options: SessionDataLayerOptions) {
@@ -61,6 +71,13 @@ export class SessionDataLayer {
     // 连接级单监听：按 topic 扇入到各 store（pane 间共享的正是这一条连接）。
     this.offFrame = this.transport.onFrame((frame, context) => {
       this.entries.get(frame.topic)?.store.handleFrame(frame, context);
+    });
+    // runtime 换代后预取结果一律作废：换代期间可能有别的进程写过库，而换代前取到的行
+    // 带着当时的 revision，新鲜度已无法由客户端判断。
+    // 这里清的是**预取缓存**，不是已播种的临时行——durable store（SQLite）跨 CLI 重启
+    // 仍然成立，把正在显示的临时行清掉只会让 pane 白屏一次。
+    this.offRuntimeRestart = this.transport.onRuntimeRestart(() => {
+      conversationRowsPrefetchCache.invalidate();
     });
   }
 
@@ -87,8 +104,48 @@ export class SessionDataLayer {
     } else {
       const store = new ConversationProjectionStore(topic, this.transport);
       entry = { store, refCount: 1, keepWarmTimer: null };
+      // 不变量：一个 topic 一个 store 实例，且**永不池化 / 跨会话复用**。
+      // 快绘临时层的「权威 snapshot 落地后永久拒绝播种」标记是按 store 实例存的
+      // （conversationFastRowsLayer.ts），复用实例会让标记泄漏到下一个会话，表现为
+      // 「快绘再也不命中」——不报错，只是静默失效，极难查。两道防线：
+      // releaseEntry 先 entries.delete 再 store.close()（见下方），所以不存在把已关闭
+      // 实例塞回表里的路径；且已关闭的 store 拒绝播种。两条都由
+      // test/sessionDataLayerStoreIdentity.test.ts 钉住。
       this.entries.set(topic, entry);
       openKind = "cold";
+      // 快绘必须在 connect 之前发出，而且这是**载荷顺序**而不是风格问题：CLI 把同一条
+      // 连接上的所有请求串在一个 FIFO 上（bootstrap/src/zcode-protocol/transport.ts:186-195，
+      // shouldBypassProcessingQueue :224-233 只放行 sessionStop / workspaceCancelGenerateText），
+      // 而 subscribe 的处理函数里就是视图冷物化（约 2 280 ms hydration）。subscribe 先进
+      // 队列，快绘就要排在整段 hydration 后面，本功能等于没做。
+      //
+      // 「把请求排在 subscribe 前面」正是 6b9c6e1 刚修掉的那个 bug 的形状（journal 发现查询
+      // 自激活、抢下串行首位、把冷视图物化挤下去，实测冷开 11.2 s），所以必须写清楚为什么
+      // 本读取不是同一件事：conversationRows 是 server.ts 的直接派发，不激活、不在请求路径上
+      // 折叠、不读 transcript、不取写锁（projection lane 的硬不变量，带测试；Main 已裁定）。
+      // 它在串行车道上的占用是 miss 时 1-3 条单行 PK 查询，hit 时一次 begin deferred 的
+      // 有界分页读——后者与 subscribe 快照本来就载的是同一量级载荷。占首位安全，恰恰因为
+      // 它便宜且不自激活。一旦那条不变量被破坏，这个派发顺序就会变成刚修掉的那个 bug，
+      // 所以依赖关系记在三处（projection §12、notes §14.4、这段注释），不记在一处。
+      notifyTaskListPrefetchOpened(sessionId);
+      const prefetched = conversationRowsPrefetchCache.consume(sessionId);
+      if (prefetched) {
+        // 预取命中是同步的，天然排在 connect 之前，一次 RPC 都不用发。
+        store.seedFastRows({
+          ok: true,
+          revision: prefetched.revision,
+          rows: prefetched.rows,
+          hasMore: prefetched.hasMore,
+        });
+      } else {
+        // 不 await：connect 才是权威路径，绝不等加速器。慢的、丢的、晚于 snapshot 才
+        // resolve 的快绘结果都会被 seedFastRows 拒掉（永久标记），因此是 no-op 而不是隐患。
+        void createConversationRowsFastReader(this.transport)
+          .read({ sessionId })
+          .then((outcome) => {
+            store.seedFastRows(outcome);
+          });
+      }
       // 订阅失败落在 store.state（status=error + retry()），不在这里抛。
       void store.connect({ rendererPrepareStartedAt: startedAt });
     }
@@ -174,6 +231,7 @@ export class SessionDataLayer {
     });
     this.disposed = true;
     this.offFrame();
+    this.offRuntimeRestart();
     for (const entry of this.entries.values()) {
       if (entry.keepWarmTimer !== null) {
         clearTimeout(entry.keepWarmTimer);

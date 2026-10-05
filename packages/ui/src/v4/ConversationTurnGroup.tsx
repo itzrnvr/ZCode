@@ -62,6 +62,7 @@ import {
 import type { ConversationCuaGroupEvent } from "@/v4/conversationCuaGroups.js";
 import { ConversationAgentToolCallRow } from "@/v4/ConversationAgentToolCallRow.js";
 import { ConversationFileSummaryPanel } from "@/v4/ConversationFileSummaryPanel.js";
+import { resolveEditWorkspaceRewindAvailability } from "@/v4/conversationProvisionalAffordances.js";
 import { WorkflowNotificationToolRow } from "@/v4/WorkflowNotificationToolRow.js";
 import { ConversationWorkflowDigests } from "@/v4/ConversationWorkflowDigests.js";
 import { ConversationWorkflowCompletion } from "@/v4/ConversationWorkflowCompletion.js";
@@ -1223,16 +1224,25 @@ function ConversationTurnGroupImpl({
     canRenderAssistantActions ||
     hasHookActions ||
     workflowTurnDigests.length > 0;
-  const editWorkspaceRewindAvailability = useMemo<EditWorkspaceRewindAvailability>(() => {
-    const fileChanges = unit.header?.fileChanges;
-    if (!fileChanges || fileChanges.files <= 0) return { enabled: false, reason: "noFiles" };
-    if (fileChanges.state === "reverted") return { enabled: false, reason: "reverted" };
-    if (unit.isRunning) return { enabled: false, reason: "running" };
-    if (unit.header?.actions?.canRewindFiles !== true) {
-      return { enabled: false, reason: "unavailable" };
-    }
-    return { enabled: true, reason: "available" };
-  }, [unit.header?.actions?.canRewindFiles, unit.header?.fileChanges, unit.isRunning]);
+  // 判定整体挪到 conversationProvisionalAffordances.ts 的纯函数里：本仓库测试栈没有组件
+  // 渲染能力（无 @testing-library / happy-dom / renderToString），只有抽成纯函数才测得到。
+  // 原有五条判定的顺序逐条保持不变，只在最前面加一条 provisional 分支——快绘窗口里
+  // fileChanges 缺席的含义是「还没算出来」，报 noFiles 会对确实改过文件的轮次说假话。
+  const editWorkspaceRewindAvailability = useMemo<EditWorkspaceRewindAvailability>(
+    () =>
+      resolveEditWorkspaceRewindAvailability({
+        provisional: context.provisionalRows === true,
+        fileChanges: unit.header?.fileChanges,
+        isRunning: unit.isRunning,
+        canRewindFiles: unit.header?.actions?.canRewindFiles,
+      }),
+    [
+      context.provisionalRows,
+      unit.header?.actions?.canRewindFiles,
+      unit.header?.fileChanges,
+      unit.isRunning,
+    ],
+  );
 
   // workflow 通知卡开头的轮去掉轮顶 padding：卡片只贴上一轮 pb-5 的常规流内间距。
   const startsWithWorkflowNotificationCard =

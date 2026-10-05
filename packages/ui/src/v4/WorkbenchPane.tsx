@@ -37,7 +37,16 @@ import type {
   OpenScopedWorkflowWorkspaceSideTabRequest,
   SyncSubagentSessionTabsRequest,
 } from "@/lib/workspaceSidePane.js";
-import { SessionPane } from "@/v4/SessionPane.js";
+import { SessionPane, type SessionPaneProps } from "@/v4/SessionPane.js";
+import {
+  DEFAULT_PANE_KEEP_ALIVE_MAX_HIDDEN,
+  createPaneKeepAliveStack,
+  type PaneKeepAliveStack,
+} from "@/v4/paneKeepAlive.js";
+import {
+  RETAINED_PANE_HIDDEN_CLASS_NAME,
+  resolveRetainedPaneProps,
+} from "@/v4/paneKeepAliveProps.js";
 import type { PaneWorkspaceBadge } from "@/v4/ConversationHeader.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { V4PaneConversationProvider } from "@/v4/V4ConversationContext.js";
@@ -313,6 +322,12 @@ interface WorkbenchLeafPaneProps {
   binding: PaneBinding | null;
   /** session workbench group 中 primary pane 的显式绑定；无 group 时为 null。 */
   primaryBinding?: WorkbenchSessionBinding | null;
+  /**
+   * 已由**别的** leaf 承载的 sessionId 集合；主 leaf 的 keep-alive 栈必须把它们剔除，
+   * 否则同一个会话会同时挂两份 pane（数据层能共享 store，但 pane 层的副作用会重复）。
+   * 宿主按 leaf 列表 memo 出一份稳定引用，避免每次渲染都重跑栈的 effect。
+   */
+  excludedSessionIds?: ReadonlySet<string>;
   shell: WorkbenchShellBinding;
   onFocusRequest: (paneId: string) => void;
   onSplit?: (paneId: string, direction: SplitDirection, scope: PaneWorkspaceScope) => void;
@@ -346,6 +361,7 @@ export function WorkbenchLeafPane({
   shellWorkspaceKey,
   binding,
   primaryBinding,
+  excludedSessionIds,
   shell,
   onFocusRequest,
   onSplit,
@@ -502,11 +518,6 @@ export function WorkbenchLeafPane({
     });
   }, [canDropSession, canSplit, onDropSession, paneId]);
 
-  if (!isPrimary && !binding) {
-    // sanitize/迁移保证非 primary 叶子必有绑定；此处是转移瞬间的防御渲染。
-    return null;
-  }
-
   const isShellWorkspace = paneWorkspaceKey(scope) === shellWorkspaceKey;
   const sessionId = isPrimary
     ? (primaryBinding?.sessionId ?? shell.sessionId)
@@ -520,6 +531,117 @@ export function WorkbenchLeafPane({
     sessionId === shell.searchResultHighlightRequest?.taskId
       ? shell.searchResultHighlightRequest
       : null;
+
+  // ── pane keep-alive（只有 shell 驱动的主 leaf 参与）──
+  // 侧栏点击改的是主 leaf 的 sessionId，同一个 SessionPane 实例换会话 = 整棵子树重挂载。
+  // 实测暖切换 1 287 ms、从空 pane 暖开 3 251 ms，而数据层其实早就暖了
+  // （SessionDataLayer 引用归零后还有 30 s keep-warm，store 与 snapshot 都在）。
+  // 所以这里留住的是**已挂载的 React 子树**，不是数据。
+  // group primary（primaryBinding 在场）与 split pane 一样是显式绑定、不随侧栏点击 churn，
+  // 给它们加栈只会白占内存，因此排除；草稿（sessionId === null）也不参与保留。
+  const keepAliveEnabled = isPrimary && !primaryBinding;
+  const keepAliveStackRef = useRef<PaneKeepAliveStack | null>(null);
+  if (keepAliveStackRef.current === null) {
+    keepAliveStackRef.current = createPaneKeepAliveStack({
+      maxHidden: DEFAULT_PANE_KEEP_ALIVE_MAX_HIDDEN,
+    });
+  }
+  const [retainedSessionIds, setRetainedSessionIds] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (!keepAliveEnabled) {
+      setRetainedSessionIds((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    const stack = keepAliveStackRef.current;
+    if (!stack) return;
+    stack.touch(sessionId);
+    if (excludedSessionIds) stack.exclude(excludedSessionIds);
+    // 活跃项在下面单独渲染，保留列表里必须排除它，否则同一个会话会挂两份 pane。
+    const next = stack.entries().filter((id) => id !== sessionId);
+    // entries() 每次返回新数组；不比较就直接 set 会让本 effect 每轮都触发一次重渲染。
+    setRetainedSessionIds((current) =>
+      current.length === next.length && current.every((id, index) => id === next[index])
+        ? current
+        : next,
+    );
+  }, [excludedSessionIds, keepAliveEnabled, sessionId]);
+
+  if (!isPrimary && !binding) {
+    // sanitize/迁移保证非 primary 叶子必有绑定；此处是转移瞬间的防御渲染。
+    return null;
+  }
+
+  // 活跃 pane 的 props 只构造一次，隐藏保留 pane 由它派生（resolveRetainedPaneProps），
+  // 而不是把 ~50 个属性再抄一遍——抄两遍迟早会漂。
+  const activePaneProps: SessionPaneProps = {
+    paneId,
+    readOnly,
+    sessionId,
+    openTrigger: isPrimary ? "sidebar" : "split",
+    activeSelectionSideChatSessionId: resolvePaneActiveSelectionSideChatSessionId(
+      sessionId,
+      shell.activeSessionId ?? shell.sessionId,
+      shell.activeSelectionSideChatSessionId,
+    ),
+    workspacePath: scope.workspacePath,
+    workspaceIdentity: scope.workspaceIdentity,
+    remoteSessionId: scope.remoteSessionId,
+    isDesktop: shell.isDesktop,
+    provider: isPrimary && isShellWorkspace ? shell.provider : undefined,
+    onSessionCreated: handleSessionCreated,
+    onSessionDeleted: handleSessionDeleted,
+    focused,
+    onSplitRight: canSplit && onSplit ? handleSplitRight : undefined,
+    onSplitDown: canSplit && onSplit ? handleSplitDown : undefined,
+    onClosePane: isPrimary ? undefined : handleClosePane,
+    workspaceBadge: !isPrimary && !isShellWorkspace ? workspaceBadgeFor(scope) : undefined,
+    draftComposerHeader: isPrimary && !primaryBinding ? shell.draftComposerHeader : undefined,
+    onDropTargetControllerChange:
+      isPrimary && !primaryBinding ? shell.onPrimaryDraftDropTargetControllerChange : undefined,
+    gitSummary: shouldUseShellStatusPanel ? shell.gitSummary : undefined,
+    gitDirtyFileCount: shouldUseShellStatusPanel ? shell.gitDirtyFileCount : undefined,
+    gitWorktreeReviewSourceId: shouldUseShellStatusPanel
+      ? shell.gitWorktreeReviewSourceId
+      : undefined,
+    gitWorktreeChangeSummary: shouldUseShellStatusPanel
+      ? shell.gitWorktreeChangeSummary
+      : undefined,
+    activeTaskChangeSummary: isPrimary ? shell.activeTaskChangeSummary : undefined,
+    summaryPanelVariantOverride: shouldUseShellStatusPanel
+      ? shell.summaryPanelVariantOverride
+      : undefined,
+    onSummaryPanelVariantOverrideChange: shouldUseShellStatusPanel
+      ? shell.onSummaryPanelVariantOverrideChange
+      : undefined,
+    onRefreshGit: shouldUseShellStatusPanel ? shell.onRefreshGit : undefined,
+    onOpenGitReview: shouldUseShellStatusPanel ? shell.onOpenGitReview : undefined,
+    onOpenBrowserUrl: shell.onOpenBrowserUrl,
+    onOpenAutomationsMain: shell.onOpenAutomationsMain,
+    onOpenCodeViewer: shell.onOpenCodeViewer,
+    onAutoOpenAssistantPptx: shell.onAutoOpenAssistantPptx,
+    onOpenFileLink: shell.onOpenFileLink,
+    onOpenSubagentSession: shell.onOpenSubagentSession,
+    onOpenBackgroundBash: shell.onOpenBackgroundBash,
+    onOpenSubagentDirectory: shell.onOpenSubagentDirectory,
+    onSyncSubagentSessionTabs: shell.onSyncSubagentSessionTabs,
+    onOpenSelectionSideChat: shell.onOpenSelectionSideChat,
+    onOpenPlanDetail: shell.onOpenPlanDetail,
+    onOpenWorkflowRun: shell.onOpenWorkflowRun,
+    onOpenWorkflowArtifact: shell.onOpenWorkflowArtifact,
+    onOpenWorkflowRunDirectory: shell.onOpenWorkflowRunDirectory,
+    onOpenWorkflowActorSession: shell.onOpenWorkflowActorSession,
+    onOpenWorkflowWorkspace: shell.onOpenWorkflowWorkspace,
+    conversationFindQuery: focused ? shell.conversationFindQuery : "",
+    conversationFindActiveIndex: focused ? (shell.conversationFindActiveIndex ?? -1) : -1,
+    conversationFindNavigationRequestId: focused
+      ? (shell.conversationFindNavigationRequestId ?? 0)
+      : 0,
+    onConversationFindMatchStateChange: focused
+      ? shell.onConversationFindMatchStateChange
+      : undefined,
+    searchResultHighlightRequest: paneSearchResultHighlightRequest,
+    onSearchResultHighlightDone: shell.onSearchResultHighlightDone,
+  };
 
   return (
     <ChatPaneShell
@@ -545,77 +667,35 @@ export function WorkbenchLeafPane({
             onMissing={onClosePane}
           />
         ) : null}
+        {keepAliveEnabled
+          ? retainedSessionIds.map((retainedSessionId) => (
+              <div
+                key={retainedSessionId}
+                className={RETAINED_PANE_HIDDEN_CLASS_NAME}
+                aria-hidden
+                inert={true}
+                data-v4-pane-keep-alive="retained"
+                data-session-id={retainedSessionId}
+              >
+                {/* 隐藏但保持挂载：租约不释放，所以 store 仍在收帧，reshow 时就是最新的
+                    （「重新显示的 keep-alive pane 必须反映新的实时事件」）。
+                    用 opacity + pointer-events + inert 而不是 display:none ——
+                    后者会把滚动容器 clientHeight 归零、虚拟器测量作废，reshow 时整列重测，
+                    keep-alive 的收益当场归零；另外 RootWorkspaceContent.tsx:113-123 记了
+                    三种布局/弹层失效（Floating UI 丢锚点、整树可见性硬切、子弹层继承
+                    display:none 变成看不见但状态已打开）。
+                    降级后的 props 见 paneKeepAliveProps.ts：活跃任务级与 shell 共享状态级
+                    的属性一律不发，否则隐藏 pane 会改 shell 路由、或多个写入方互相覆盖。 */}
+                <SessionPane {...resolveRetainedPaneProps(activePaneProps, retainedSessionId)} />
+              </div>
+            ))
+          : null}
+        {/* keep-alive 打开时必须给 key：否则 React 会把同一个实例在活跃位与保留位之间
+            挪来挪去，每次切换都 remount——那正是这里要省掉的开销。非 keep-alive 路径
+            不给 key，保持今天的行为（实例跨 sessionId 变化存活）。 */}
         <SessionPane
-          paneId={paneId}
-          readOnly={readOnly}
-          sessionId={sessionId}
-          openTrigger={isPrimary ? "sidebar" : "split"}
-          activeSelectionSideChatSessionId={resolvePaneActiveSelectionSideChatSessionId(
-            sessionId,
-            shell.activeSessionId ?? shell.sessionId,
-            shell.activeSelectionSideChatSessionId,
-          )}
-          workspacePath={scope.workspacePath}
-          workspaceIdentity={scope.workspaceIdentity}
-          remoteSessionId={scope.remoteSessionId}
-          isDesktop={shell.isDesktop}
-          provider={isPrimary && isShellWorkspace ? shell.provider : undefined}
-          onSessionCreated={handleSessionCreated}
-          onSessionDeleted={handleSessionDeleted}
-          focused={focused}
-          onSplitRight={canSplit && onSplit ? handleSplitRight : undefined}
-          onSplitDown={canSplit && onSplit ? handleSplitDown : undefined}
-          onClosePane={isPrimary ? undefined : handleClosePane}
-          workspaceBadge={!isPrimary && !isShellWorkspace ? workspaceBadgeFor(scope) : undefined}
-          draftComposerHeader={isPrimary && !primaryBinding ? shell.draftComposerHeader : undefined}
-          onDropTargetControllerChange={
-            isPrimary && !primaryBinding
-              ? shell.onPrimaryDraftDropTargetControllerChange
-              : undefined
-          }
-          gitSummary={shouldUseShellStatusPanel ? shell.gitSummary : undefined}
-          gitDirtyFileCount={shouldUseShellStatusPanel ? shell.gitDirtyFileCount : undefined}
-          gitWorktreeReviewSourceId={
-            shouldUseShellStatusPanel ? shell.gitWorktreeReviewSourceId : undefined
-          }
-          gitWorktreeChangeSummary={
-            shouldUseShellStatusPanel ? shell.gitWorktreeChangeSummary : undefined
-          }
-          activeTaskChangeSummary={isPrimary ? shell.activeTaskChangeSummary : undefined}
-          summaryPanelVariantOverride={
-            shouldUseShellStatusPanel ? shell.summaryPanelVariantOverride : undefined
-          }
-          onSummaryPanelVariantOverrideChange={
-            shouldUseShellStatusPanel ? shell.onSummaryPanelVariantOverrideChange : undefined
-          }
-          onRefreshGit={shouldUseShellStatusPanel ? shell.onRefreshGit : undefined}
-          onOpenGitReview={shouldUseShellStatusPanel ? shell.onOpenGitReview : undefined}
-          onOpenBrowserUrl={shell.onOpenBrowserUrl}
-          onOpenAutomationsMain={shell.onOpenAutomationsMain}
-          onOpenCodeViewer={shell.onOpenCodeViewer}
-          onAutoOpenAssistantPptx={shell.onAutoOpenAssistantPptx}
-          onOpenFileLink={shell.onOpenFileLink}
-          onOpenSubagentSession={shell.onOpenSubagentSession}
-          onOpenBackgroundBash={shell.onOpenBackgroundBash}
-          onOpenSubagentDirectory={shell.onOpenSubagentDirectory}
-          onSyncSubagentSessionTabs={shell.onSyncSubagentSessionTabs}
-          onOpenSelectionSideChat={shell.onOpenSelectionSideChat}
-          onOpenPlanDetail={shell.onOpenPlanDetail}
-          onOpenWorkflowRun={shell.onOpenWorkflowRun}
-          onOpenWorkflowArtifact={shell.onOpenWorkflowArtifact}
-          onOpenWorkflowRunDirectory={shell.onOpenWorkflowRunDirectory}
-          onOpenWorkflowActorSession={shell.onOpenWorkflowActorSession}
-          onOpenWorkflowWorkspace={shell.onOpenWorkflowWorkspace}
-          conversationFindQuery={focused ? shell.conversationFindQuery : ""}
-          conversationFindActiveIndex={focused ? (shell.conversationFindActiveIndex ?? -1) : -1}
-          conversationFindNavigationRequestId={
-            focused ? (shell.conversationFindNavigationRequestId ?? 0) : 0
-          }
-          onConversationFindMatchStateChange={
-            focused ? shell.onConversationFindMatchStateChange : undefined
-          }
-          searchResultHighlightRequest={paneSearchResultHighlightRequest}
-          onSearchResultHighlightDone={shell.onSearchResultHighlightDone}
+          key={keepAliveEnabled ? (sessionId ?? "draft") : undefined}
+          {...activePaneProps}
         />
       </V4PaneConversationProvider>
     </ChatPaneShell>

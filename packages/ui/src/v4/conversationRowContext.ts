@@ -35,6 +35,15 @@ export type ConversationFileChangesState = Exclude<
 
 export interface ConversationRowRenderContext {
   logEpoch?: string;
+  /**
+   * 当前渲染的是「快绘临时行」（conversationRows 直读 durable store，权威 snapshot 尚未到达）。
+   *
+   * 行级能力据此降级，清单见 conversationProvisionalAffordances.ts 的
+   * PROVISIONAL_SUPPRESSED_ROW_AFFORDANCES：需要水位（baseRevision + baseLogEpoch）的只读查询
+   * 与带 rowId 的命令目标一律缺席，因为临时行两样都没有——rowId 是投影计数器，
+   * 跑过 hook 的会话里会与权威 rowId 错位。权威 snapshot 落地后本标记变 false，能力自动恢复。
+   */
+  provisionalRows?: boolean;
   workspacePath: string;
   /** 当前 workspace Host 的用户 Home，用于解析 Assistant 输出中的 ~/ 路径。 */
   workspaceHomePath?: string;

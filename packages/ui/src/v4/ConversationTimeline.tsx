@@ -92,6 +92,10 @@ import {
   advanceTimelineFastScrollState,
   type TimelineFastScrollState,
 } from "@/v4/timelineFastScroll.js";
+import {
+  FIRST_PAINT_SETTLE_IDLE_TIMEOUT_MS,
+  resolveTimelineOverscan,
+} from "@/v4/timelineViewportOverscan.js";
 import { useConversationTimelineFind } from "@/v4/useConversationTimelineFind.js";
 import { ConversationSelectionTooltip } from "@/v4/ConversationSelectionTooltip.js";
 import type { ConversationSelectionReference } from "@/lib/conversationSelectionReference.js";
@@ -100,7 +104,6 @@ import type { ConversationSelectionReference } from "@/lib/conversationSelection
 // 让未传该属性的渲染绕过稳定引用边界；共享只读空数组可保持默认值恒定。
 const EMPTY_PENDING_GUIDES: readonly QueueItem[] = [];
 
-const ROW_OVERSCAN = 8;
 const RUNNING_WORK_DURATION_TICK_MS = 1000;
 const COMPOSER_MESSAGE_MASK_FADE_PX = 24;
 const COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96;
@@ -705,6 +708,41 @@ function ConversationTimelineImpl({
     [],
   );
 
+  // ── 首绘期收窄虚拟窗口 ──
+  // 冷开时窗口里的 turn unit 很少（实测 unitCount = 3，D:/tmp/ab/trace-summary.json），
+  // 常态 overscan 8 足以把整份列表挂上去，于是「虚拟化」在小列表上等价于全量挂载。
+  // 这里在首绘落定前收窄，落定后立刻恢复；策略、实测依据与两个触发源的理由见
+  // timelineViewportOverscan.ts。
+  const [overscanEscalated, setOverscanEscalated] = useState(false);
+  const overscanEscalatedRef = useRef(false);
+  // 单向闩锁：idle 落定与用户滚动两个触发源都只把它从 false 推到 true，
+  // 会话切换时在下方那个 layout effect 里随测高缓存一起复位。
+  const markOverscanEscalated = useCallback(() => {
+    if (overscanEscalatedRef.current) return;
+    overscanEscalatedRef.current = true;
+    setOverscanEscalated(true);
+  }, []);
+  useEffect(() => {
+    if (overscanEscalatedRef.current || virtualizedUnits.length === 0) return undefined;
+    // requestIdleCallback + setTimeout 兜底：窗口被遮挡/最小化时 idle 回调会被节流甚至
+    // 永不触发，只靠它会让 overscan 永远停在收窄档，用户一恢复窗口就看到空行。
+    // 写法同 hooks/useTabPersistence.ts:32-42（本仓库唯一的 requestIdleCallback 先例）。
+    let idleHandle = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (typeof window.requestIdleCallback === "function") {
+      idleHandle = window.requestIdleCallback(() => markOverscanEscalated(), {
+        timeout: FIRST_PAINT_SETTLE_IDLE_TIMEOUT_MS,
+      });
+    } else {
+      timer = setTimeout(markOverscanEscalated, 0);
+    }
+    return () => {
+      // 无效 handle 传给 cancelIdleCallback / clearTimeout 都是规范内的 no-op，不加判空。
+      if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idleHandle);
+      clearTimeout(timer);
+    };
+  }, [markOverscanEscalated, virtualizedUnits.length]);
+
   const getScrollElement = useCallback(() => scrollRef.current, []);
   const getItemKey = useCallback(
     (index: number) => virtualizedUnitsRef.current[index]?.key ?? index,
@@ -736,7 +774,10 @@ function ConversationTimelineImpl({
     count: virtualizedUnits.length,
     getScrollElement,
     estimateSize,
-    overscan: ROW_OVERSCAN,
+    overscan: resolveTimelineOverscan({
+      escalated: overscanEscalated,
+      unitCount: virtualizedUnits.length,
+    }),
     getItemKey,
     measureElement,
     // headerSlot（分享导入的只读块）与虚拟列表同处一个滚动容器，
@@ -1321,6 +1362,9 @@ function ConversationTimelineImpl({
           : Date.now() <= layoutScrollGuardUntilRef.current
             ? "layout"
             : "user";
+    // 用户一滚动就立刻恢复常态 overscan：忙渲染时 idle 回调可能被无限推迟，
+    // 只等 idle 会让正在滚动的用户看到空行。
+    if (scrollSource === "user") markOverscanEscalated();
     // virtualizer 的原生 offset observer 会先于 React onScroll 入账；到这里即可确认它
     // 已看见恢复后的真实 scrollTop。用户滚动也应立即结束保护窗，把滚动权交还用户。
     if (scrollSource !== "layout") {
@@ -1375,6 +1419,7 @@ function ConversationTimelineImpl({
   }, [
     commitFollowing,
     getActiveUserScrollIntent,
+    markOverscanEscalated,
     saveCurrentScrollMemory,
     scheduleTurnNavigatorViewportSync,
     updateFastScrollPaintSkip,
@@ -1572,6 +1617,11 @@ function ConversationTimelineImpl({
     // 会话切换不能把上一段猛甩的「跳过绘制」状态带进新会话。
     releaseFastScrollPaintSkip();
     heightCacheRef.current?.clear();
+    // 首绘收窄的 overscan 随会话一起复位：新会话又是一次冷启，重新享受一次收窄。
+    if (overscanEscalatedRef.current) {
+      overscanEscalatedRef.current = false;
+      setOverscanEscalated(false);
+    }
     // prepend 锚定基线一并重置：rowId 跨会话可重复，禁止拿旧会话首行比较。
     prependAnchorRef.current = { firstRowId: null, totalSize: 0 };
     pendingPrependVirtualAnchorRef.current = null;

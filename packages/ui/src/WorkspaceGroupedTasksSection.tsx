@@ -38,6 +38,7 @@ import { applyTaskQueryCacheMutation } from "@/store/taskQueryCacheStore.js";
 import { useRemotePinnedTaskStore } from "@/store/remotePinnedTaskStore.js";
 import { useRemoteTimelineTaskStore } from "@/store/remoteTimelineTaskStore.js";
 import { bumpTaskListMembershipVersion } from "@/v4/taskListMembershipVersion.js";
+import { useTaskListPrefetchGroupedView } from "@/v4/useTaskListPrefetch.js";
 import { GroupItem, GroupedTaskItem } from "@/workspace-grouped-tasks/items.js";
 import { GroupDragOverlay } from "@/workspace-grouped-tasks/group-drag-overlay.js";
 import { VirtualizedGroupedTopLevelList } from "@/workspace-grouped-tasks/virtualized-top-level-list.js";
@@ -611,6 +612,10 @@ export function WorkspaceGroupedTasksSection({
     () => filterGroupedViewByTaskKeys(authoritativeView, archivingTaskKeys),
     [archivingTaskKeys, authoritativeView],
   );
+  // 可见行 -> 会话行预取（K=6、串行、idle 调度、交互即让路）。所有策略都在
+  // @/v4/useTaskListPrefetch 与 @/v4/conversationRowsPrefetch 里，本文件只出这一个调用：
+  // 不放排序逻辑、不放 service 查找、不放状态（lane 例外只批了这一行）。
+  useTaskListPrefetchGroupedView(view);
 
   useEffect(() => {
     if (archivingTaskKeys.size === 0) {

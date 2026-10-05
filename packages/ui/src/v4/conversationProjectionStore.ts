@@ -23,6 +23,11 @@ import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
 import type { ConversationTransport } from "@/v4/transport.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
+import {
+  createFastRowsLayer,
+  type ConversationFastRows,
+} from "@/v4/conversationFastRowsLayer.js";
+import type { ConversationRowsFastOutcome } from "@/v4/conversationRowsFastPath.js";
 
 /**
  * runtime 换代打断 subscribe 后的退避节奏。
@@ -129,6 +134,13 @@ export interface ConversationStoreState {
    * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态缓存失效。
    */
   turnNavigatorDirectoryRevision: number;
+  /**
+   * 快绘临时行：`conversationRows` 直读 durable store 的结果，只在权威 snapshot 到达之前
+   * 用于首绘。三条硬规则——不进 snapshot、不当 delta base（它没有任何水位）、整体丢弃
+   * 绝不按 rowId 合并（快绘 rowId 是投影计数器，跑过 hook 的会话会与权威 rowId 错位）。
+   * 完整理由见 conversationFastRowsLayer.ts 文件头。
+   */
+  fastRows: ConversationFastRows | null;
 }
 
 export interface SessionOpenRendererTiming {
@@ -150,6 +162,7 @@ const INITIAL_STATE: ConversationStoreState = {
   planDirectoryRevision: 0,
   plansLoading: false,
   turnNavigatorDirectoryRevision: 0,
+  fastRows: null,
 };
 
 const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
@@ -330,6 +343,7 @@ export class ConversationProjectionStore {
       > & { directoryRevision: number })
     | null = null;
   private closed = false;
+  private readonly fastRowsLayer = createFastRowsLayer();
 
   constructor(
     readonly topic: string,
@@ -364,6 +378,22 @@ export class ConversationProjectionStore {
         this.handleRuntimeRestart(reason),
       );
     }
+  }
+
+  /**
+   * 播下快绘临时行（SessionDataLayer 在 acquire 时、connect 之前调用）。返回是否落地。
+   *
+   * 拒绝条件见 conversationFastRowsLayer.ts：已落地过任何权威 snapshot（**永久**拒绝）、
+   * store 已关闭、outcome 不是 ok、或行窗口为空。永久拒绝那一条是竞态防线：
+   * projection 侧的后台折叠是 coalesced + single-flighted，写突发会推迟它，所以一次读取
+   * 可能晚于首个 snapshot 才 resolve，那时它在时间上更新但不是「更正确」，
+   * 应用它等于用临时数据覆盖权威状态。
+   */
+  seedFastRows(outcome: ConversationRowsFastOutcome): boolean {
+    if (this.closed) return false;
+    if (!this.fastRowsLayer.seed(outcome, monotonicNow())) return false;
+    this.setState({ fastRows: this.fastRowsLayer.read() });
+    return true;
   }
 
   getState(): ConversationStoreState {
@@ -663,8 +693,13 @@ export class ConversationProjectionStore {
         "snapshot",
       );
       // 规则 1：整体替换，扔掉手里的一切换新的。
+      // 快绘临时行在同一个 setState 里一起清空：一次通知里不会出现「snapshot 与 fastRows
+      // 同时非空」的中间态，消费方因此不需要自己判优先级。
+      // markAuthoritative 必须在 setState 之前，且是永久的（理由见 seedFastRows）。
+      this.fastRowsLayer.markAuthoritative();
       this.setState({
         snapshot: frame.payload.snapshot,
+        fastRows: null,
         planDirectoryRevision: this.state.planDirectoryRevision + 1,
         // snapshot 整体替换后 real-user query 集合可能已变，终态缓存必须失效。
         turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
@@ -983,6 +1018,10 @@ export class ConversationProjectionStore {
    * - 陈旧读防护：atLogEpoch ≠ 当前快照 epoch 的结果整体丢弃（跨 CLI 重启）；
    * - 合并以 rowId 为键：与订阅流的 row.upserted/removed 天然一致，
    *   在途期间到达的 delta 帧不受影响（它们只动 ≥ 窗口首行的行）。
+   * - 快绘窗口天然不参与：`snapshot === null` 时下面就直接返回，所以临时行在场期间不可能
+   *   对着一个没有水位的 base 翻页。**不要**为「快绘也能向上翻」加代码——mergeOlderRows
+   *   没有唯一性检查（只过滤 rowId < 窗口首行），而快绘 rowId 与权威 rowId 会错位，
+   *   前插会产生重复行。
    */
   async loadOlder(limit: number = PROTOCOL_V4_LIMITS.snapshotTailWindowRows): Promise<void> {
     if (this.closed || this.state.loadingOlder) return;
@@ -1355,7 +1394,8 @@ export class ConversationProjectionStore {
     this.subscriptionHasAppliedBase = false;
     this.generation++;
     const { subscriptionId } = this.state;
-    this.setState({ status: "closed", subscriptionId: null });
+    this.fastRowsLayer.clear();
+    this.setState({ status: "closed", subscriptionId: null, fastRows: null });
     if (subscriptionId) {
       try {
         await this.transport.unsubscribe(subscriptionId);

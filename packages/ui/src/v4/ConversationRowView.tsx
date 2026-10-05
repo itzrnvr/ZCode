@@ -109,6 +109,7 @@ import {
   type ConversationRowRenderContext,
 } from "@/v4/conversationRowContext.js";
 import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
+import { resolveEditRewindExplanationMessageId } from "@/v4/conversationProvisionalAffordances.js";
 import { CodeCommentAttachmentChip } from "@/v4/composer/CodeCommentAttachmentChip.js";
 import {
   countComposerPromptContexts,
@@ -238,7 +239,11 @@ export function readAssistantFeedback(row: AssistantTextRow): AssistantMessageFe
 
 export interface EditWorkspaceRewindAvailability {
   enabled: boolean;
-  reason: "available" | "noFiles" | "reverted" | "running" | "unavailable";
+  // "pending"：快绘窗口里 turnHeader.fileChanges 缺席，含义是「还没算出来」而不是
+  // 「这一轮没改文件」（它要 buildColdFileChangeSummaries = CheckpointCreated 内存事件 +
+  // record.app.readToolResultArtifact，都绑定 activation）。此时不能复用 noFiles 的文案，
+  // 否则会对一个确实改过文件的轮次说一句假话；解释句直接不给，只留准确的按钮标题。
+  reason: "available" | "noFiles" | "reverted" | "running" | "unavailable" | "pending";
 }
 
 interface ConversationRowViewProps {
@@ -907,12 +912,15 @@ const UserInputRowView = memo(function UserInputRowView({
   const rewindWorkspaceTooltipTitle = intl.formatMessage({
     id: "chat.edit.resetConversationAndFiles.tooltip",
   });
+  // 收口成函数而不是在 JSX 里插值：reason 是闭集，直接把值拼进 message id 的话，
+  // 以后往闭集加一个值就会悄悄拼出一个不存在的 id（"pending" 正是这么来的）。
+  const rewindWorkspaceExplanationMessageId = resolveEditRewindExplanationMessageId(
+    editWorkspaceRewindAvailability?.reason,
+  );
   const rewindWorkspaceTooltipDescription =
-    editWorkspaceRewindAvailability?.reason === "available"
+    rewindWorkspaceExplanationMessageId === null
       ? undefined
-      : intl.formatMessage({
-          id: `chat.edit.resetConversationAndFiles.${editWorkspaceRewindAvailability?.reason ?? "noFiles"}`,
-        });
+      : intl.formatMessage({ id: rewindWorkspaceExplanationMessageId });
   const visibleText = parsedShareContext.visibleContent;
   const codeCommentContexts = parsedPrompt.codeComments;
   const webElementContexts = parsedPrompt.webElements;

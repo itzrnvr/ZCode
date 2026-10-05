@@ -28,8 +28,10 @@ import {
   type V4ConversationFileRewindPreviewResult,
   type V4ConversationPlansParams,
   type V4ConversationPlansResult,
+  type V4ConversationRowsParams,
   type V4ConversationRowsRangeParams,
   type V4ConversationRowsRangeResult,
+  type V4ConversationRowsResult,
   type V4ConversationSubscribeResult,
   type V4ConversationResyncResult,
 } from "@zcode/shared/zcode-protocol-v4";
@@ -81,7 +83,7 @@ type ConversationV4AgentService = Pick<
   | "onDynamicLocalTtftFacts"
   | "onAgentRuntimeRestarted"
 > &
-  Partial<Pick<IZCodeAgentService, "onAgentRuntimeLifecycle">>;
+  Partial<Pick<IZCodeAgentService, "onAgentRuntimeLifecycle" | "conversationRowsV4">>;
 
 /**
  * 一条 host 连接（= 一个 workspace）上的 v4 conversation 传输面。
@@ -381,6 +383,29 @@ export function createAgentConversationTransport(
         sessionId: params.sessionId,
         ...(params.beforeRowId !== undefined ? { beforeRowId: params.beforeRowId } : {}),
         limit: params.limit,
+      });
+    },
+    async conversationRows(
+      params: V4ConversationRowsParams,
+    ): Promise<V4ConversationRowsResult> {
+      await ensureHandshake();
+      // 旧 host 的缺席在类型上是可选成员。desktop/web 的 service proxy 对任何字符串属性都
+      // 返回一个函数（rpc/src/proxy-channel.ts:110-141），所以「成员不存在」这条路只在非
+      // proxy 的传输面上成立（静态回放、ReplaceableConversationTransport 构造期擦除）；
+      // proxy 上的旧 host 表现为 RPC 被拒（CLI default 分支 -32601）。两者都由
+      // conversationRowsFastPath 归入同一个 reason: "unavailable" 退回桶。
+      const call = agentService.conversationRowsV4;
+      if (typeof call !== "function") {
+        return { ok: false, reason: "unavailable" };
+      }
+      // 用 .call 绑定 agentService 而不是裸调：与 conversationRowsFastPath 里同一条纪律，
+      // 承载方可能是 class 实现（方法体读 this），解绑会拿到 undefined。
+      return call.call(agentService, {
+        ...workspace,
+        sessionId: params.sessionId,
+        ...(params.minRevision !== undefined ? { minRevision: params.minRevision } : {}),
+        ...(params.beforeRowId !== undefined ? { beforeRowId: params.beforeRowId } : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
       });
     },
     async plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult> {

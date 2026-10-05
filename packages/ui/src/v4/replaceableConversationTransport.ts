@@ -7,6 +7,7 @@ type RuntimeRestartListener = Parameters<ConversationTransport["onRuntimeRestart
 type RuntimeLifecycleListener = Parameters<
   NonNullable<ConversationTransport["onRuntimeLifecycle"]>
 >[0];
+type ConversationRowsRead = NonNullable<ConversationTransport["conversationRows"]>;
 
 async function unsubscribeIgnoringFailure(
   transport: ConversationTransport,
@@ -57,9 +58,29 @@ export class ReplaceableConversationTransport implements ConversationTransport {
     };
   };
 
+  /**
+   * 快绘读的稳定身份转发。承载方没有该成员时在构造期抹掉（同 onRuntimeLifecycle），
+   * 消费方 conversationRowsFastPath 据此直接退回今天的 subscribe 路径，
+   * 不发一次注定被拒的 RPC。能力按构造时的 current 判定，理由同上：同一 workspace 的
+   * 后续 transport 均由 createAgentConversationTransport 产出，支持性只取决于 agentService，
+   * 换代不会翻转。
+   *
+   * ⚠ 接口新增成员时这里必须同步长出一条转发，否则走 service proxy 的远端 pane 上
+   * 该方法是 undefined（见下方 workflowRunEvents 那次真实事故的记录）。
+   */
+  conversationRows?: ConversationRowsRead = async (params) => {
+    const read = this.current.conversationRows;
+    if (!read) return { ok: false, reason: "unavailable" };
+    // .call 绑定 current：承载方可能是 class 实现（方法体读 this）。
+    return read.call(this.current, params);
+  };
+
   constructor(private current: ConversationTransport) {
     if (!current.onRuntimeLifecycle) {
       this.onRuntimeLifecycle = undefined;
+    }
+    if (!current.conversationRows) {
+      this.conversationRows = undefined;
     }
   }
 
