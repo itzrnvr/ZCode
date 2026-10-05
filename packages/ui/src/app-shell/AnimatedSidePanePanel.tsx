@@ -84,6 +84,7 @@ import {
   type OpenScopedWorkflowRunSideTabRequest,
   type OpenBackgroundBashSideTabRequest,
   type WorkspaceSidePaneState,
+  type WorkspaceSidePaneTab,
 } from "@/lib/workspaceSidePane.js";
 import { inferMediaPreview, type CodeViewerSource } from "@/lib/codeViewer.js";
 import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js";
@@ -309,6 +310,7 @@ export function AnimatedSidePanePanel({
   onCloseTab,
   onCloseOtherTabs,
   onCloseAllTabs,
+  onPromoteTab,
   onReopenClosedTab,
   onOpenBrowserTab,
   onOpenWhiteboard: _onOpenWhiteboard,
@@ -374,6 +376,8 @@ export function AnimatedSidePanePanel({
   onCloseTab: (tabId: string) => void;
   onCloseOtherTabs: (tabId: string) => void;
   onCloseAllTabs: () => void;
+  /** 只对 selection-side-chat tab 有意义；缺省时 tab 右键菜单不渲染这一项。 */
+  onPromoteTab?: (tab: Extract<WorkspaceSidePaneTab, { type: "selection-side-chat" }>) => void;
   onReopenClosedTab: (tabId: string) => void;
   onOpenBrowserTab: () => void;
   onOpenWhiteboard: () => void;
@@ -1021,6 +1025,10 @@ export function AnimatedSidePanePanel({
                                   onCloseOtherTabs={onCloseOtherTabs}
                                   onCloseAllTabs={onCloseAllTabs}
                                   canCloseOtherTabs={visibleTabs.length > 1}
+                                  promoteTabLabel={intl.formatMessage({
+                                    id: "sidePane.promoteSideChatTab",
+                                  })}
+                                  onPromoteTab={onPromoteTab}
                                 />
                               );
                             })}

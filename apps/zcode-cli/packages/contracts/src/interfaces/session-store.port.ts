@@ -334,6 +334,17 @@ export interface RepairRemoteSessionPathsInput {
   timeUpdated: number;
 }
 
+/**
+ * `promoteSelectionSideChat` 的结果。`promoted: false` 不是错误：CAS 未命中意味着这个会话
+ * 本来就不是副屏，或者已经被提升过了（重复点击、并发点击都落在这里），调用方应把它当成
+ * 幂等成功来处理，并且**不能**据此去改 runtime 记录。
+ */
+export interface PromoteSelectionSideChatResult {
+  promoted: boolean;
+  /** 提升后（或 CAS 未命中时当前）的会话行；id 不存在时为 null。 */
+  session: SessionInfo | null;
+}
+
 export type OutputFormat =
   | { type: "text" }
   | { type: "json_schema"; schema: Record<string, unknown>; retryCount?: number };
@@ -1122,6 +1133,26 @@ export interface SessionStorePort {
    * 实现只能更新 directory、path 和单调 time_updated，禁止写回其它 session 元数据。
    */
   repairRemoteSessionPaths?(input: RepairRemoteSessionPathsInput): Promise<boolean>;
+  /**
+   * 把框选副屏提升为正式会话：`task_type` selection_side_chat -> interactive、`parent_id` 清空，
+   * 可选地同时改标题。消息/part 一行不动，会话 id 不变。
+   *
+   * 可选——只有 SQLite 宿主实现；缺席时调用方按结构化「能力不支持」返回，不要退回裸 SQL
+   * （renderer 侧直接 UPDATE session 是 zk-kit 的旧做法，绕开迁移与 runtime 记录）。
+   *
+   * 实现要求：
+   * - 单条 UPDATE，`where id = ? and task_type = 'selection_side_chat'` 就是 CAS；
+   *   0 行受影响 = 不是副屏或已提升过，返回 `promoted: false`，**幂等**；
+   * - **不要**动 `time_updated`：conversation projection 的 revision 是
+   *   `time_updated:watermark:schemaVersion`（bootstrap/conversation-rows-operation.ts），
+   *   而提升不改任何 message/part，动它只会让下一次快路径读白返回一次 stale 并触发
+   *   一次整会话重折叠（22515 part 的会话上是秒级开销）；
+   * - 返回提升后的真实行，调用方据此核对而不是自己再查一次。
+   */
+  promoteSelectionSideChat?(input: {
+    id: SessionId;
+    title?: string;
+  }): Promise<PromoteSelectionSideChatResult>;
   saveMessage(input: MessageInfo, copyFrom?: { sessionID: SessionId; id: string }): Promise<void>;
   removeMessage(input: { sessionID: SessionId; messageID: MessageId }): Promise<void>;
   savePart(input: MessagePart, copyFrom?: { sessionID: SessionId; id: string }): Promise<void>;

@@ -1990,6 +1990,7 @@ const zhCN: Record<string, string> = {
   "settings.shortcuts.command.zoomIn": "放大",
   "settings.shortcuts.command.zoomOut": "缩小",
   "settings.shortcuts.command.resetZoom": "恢复缩放",
+  "settings.shortcuts.command.promoteSideChatToSession": "把副屏提升为正式会话",
   "settings.appearance.interfaceTitle": "界面设置",
   "settings.appearance.interfaceDescription": "设置应用主题和界面文字大小。",
   "settings.appearance.codeTitle": "代码设置",

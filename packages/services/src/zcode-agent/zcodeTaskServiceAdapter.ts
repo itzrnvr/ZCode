@@ -119,6 +119,7 @@ import type {
   ZCodeTaskReadyOutcome,
   ZCodeTaskTerminalOutcome,
 } from "../session/zcodeTaskService.js";
+import { isSideChatTitle } from "#src/session/sideChatFilter.js";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import {
   AUTOMATION_MUTATION_TOOL_NAMES,
@@ -1915,6 +1916,73 @@ export function createZCodeTaskServiceAdapter(
         ...meta,
         initialSlashCommands: snapshot.slashCommands ?? EMPTY_SLASH_COMMANDS,
       };
+    },
+
+    async promoteSideChatTask(params): Promise<ZCodeTaskMeta | null> {
+      const target = normalizeWorkspaceParams(params);
+      const sessionId = params.taskId;
+      // 读快照在提升**之前**：提升只改归属，消息一行不动，所以这份快照的正文就是提升后的正文。
+      // 用默认 runtimePolicy（与 createTask 的 readSession 同一约定）：副屏可能已经没有活
+      // runtime，而提升是用户显式动作，拉起 host 是可接受的代价（不像冷开会话那样在点击路径上）。
+      const snapshot = await options.zcodeAgentService.readSession({
+        ...target,
+        ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
+        sessionId,
+      });
+      // 副屏的存储标题就是占位串 "Selection side chat"，而任务列表的 excludeSideChats 是
+      // **标题制**的：只翻 task_type 会让提升后的会话写进 tasks-index 又被同一个过滤器滤掉，
+      // 用户看到的就是"点了没反应"。所以占位标题必须在这里换成从首条真实用户输入派生的标题
+      // （resolveZCodeVisibleSessionTitle 的 80 字截断），并随提升一起写进存储层——
+      // 只改索引行的话，下一次 resyncTaskIndexRowFromAgent 会用存储标题把它盖回去。
+      const derivedTitle = deriveTitleFromSnapshot(snapshot);
+      const promotedTitle = isSideChatTitle(derivedTitle)
+        ? resolveZCodeVisibleSessionTitle({
+            title: "",
+            messages: snapshot.messages,
+            target: snapshot.projection.target,
+          })
+        : undefined;
+
+      const result = await options.zcodeAgentService.promoteSessionSideChat({
+        ...target,
+        ...(params.remoteSessionId ? { remoteSessionId: params.remoteSessionId } : {}),
+        sessionId,
+        ...(promotedTitle ? { title: promotedTitle } : {}),
+      });
+      if (!result.promoted) {
+        logger.info(undefined, "[ZCodeTaskService] promoteSideChatTask CAS missed", {
+          taskId: sessionId,
+          taskType: result.taskType ?? null,
+          workspaceKey: resolveWorkspaceKey(params),
+        });
+        return null;
+      }
+
+      // 不再读第二次快照：存储层现在的标题就是我们刚传上去的那个，本地改一份等价，
+      // 省掉一次可能秒级的 runtime 读。
+      const promotedSnapshot = promotedTitle
+        ? { ...snapshot, session: { ...snapshot.session, title: promotedTitle } }
+        : snapshot;
+      const meta = await syncTaskIndexSnapshot(promotedSnapshot);
+      // 与 createTask 同一套收尾：分组置顶 -> 让 syncer 订阅这个会话（副屏从来不在订阅里，
+      // 不订阅的话提升后的行不会再随后续事件更新）-> 按 task_created 广播。
+      await taskIndexRepo.initializeGroupedTaskAtTop({
+        workspacePath: meta.workspacePath,
+        workspaceIdentity: meta.workspaceIdentity,
+        taskId: meta.taskId,
+      });
+      notifySyncerSession({
+        taskId: meta.taskId,
+        workspacePath: meta.workspacePath,
+        workspaceIdentity: meta.workspaceIdentity,
+      });
+      emitWorkspaceTaskListChanged(target, meta, "task_created");
+      logger.info(undefined, "[ZCodeTaskService] promoteSideChatTask done", {
+        taskId: meta.taskId,
+        workspaceKey: resolveWorkspaceKey(params),
+        titleChanged: promotedTitle !== undefined,
+      });
+      return meta;
     },
 
     async sendPrompt(params): Promise<void> {

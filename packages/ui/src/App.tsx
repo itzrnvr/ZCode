@@ -260,6 +260,7 @@ export function App({
     handleCloseSidePaneTab,
     handleCloseOtherSidePaneTabs,
     handleCloseAllSidePaneTabs,
+    handlePromoteSelectionSideChatTab,
     handleReopenClosedSidePaneTab,
     handleBrowserNavigationRequestHandled,
     handleBrowserPageMetadataChange,
@@ -416,6 +417,15 @@ export function App({
   const activeSidePaneTab = useMemo(() => getActiveSidePaneTab(sidePaneState), [sidePaneState]);
   const isBrowserOpen = activeSidePaneTab?.type === "browser";
   const isGitOpen = activeSidePaneTab?.type === "git";
+  // ⌘/Ctrl+Shift+E：把**当前正在看的那个副屏 tab** 提升为正式会话。
+  // 只认 selection-side-chat 类型的活动 tab，其余情况返回 null 让分发器把这个命令视为不可用
+  // （useAppKeyboard 按 handler 是否存在决定要不要吃这次按键），避免在普通 tab 上静默无响应。
+  const promotableSideChatTab =
+    activeSidePaneTab?.type === "selection-side-chat" ? activeSidePaneTab : null;
+  const handlePromoteActiveSideChat = useCallback(() => {
+    if (!promotableSideChatTab) return;
+    void handlePromoteSelectionSideChatTab(promotableSideChatTab);
+  }, [handlePromoteSelectionSideChatTab, promotableSideChatTab]);
   const hasGitTab = sidePaneState?.tabs.some((tab) => tab.type === "git") ?? false;
   const handleRefreshGit = useCallback(() => {
     setGitRefreshVersion((value) => value + 1);
@@ -975,6 +985,7 @@ export function App({
     navigateForward: canTaskNavForward
       ? () => runVisibleWorkspaceCommand(handleTaskNavForward)
       : null,
+    promoteSideChatToSession: promotableSideChatTab ? handlePromoteActiveSideChat : null,
   });
 
   useEffect(() => {
@@ -1275,6 +1286,7 @@ export function App({
         handleCloseSidePaneTab={handleCloseSidePaneTab}
         handleCloseOtherSidePaneTabs={handleCloseOtherSidePaneTabs}
         handleCloseAllSidePaneTabs={handleCloseAllSidePaneTabs}
+        handlePromoteSelectionSideChatTab={handlePromoteSelectionSideChatTab}
         handleReopenClosedSidePaneTab={handleReopenClosedSidePaneTab}
         handleBrowserNavigationRequestHandled={handleBrowserNavigationRequestHandled}
         setIsTerminalOpen={setIsTerminalOpen}

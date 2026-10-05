@@ -239,6 +239,23 @@ export interface IZCodeTaskService {
     v4Create?: boolean;
   }): Promise<ZCodeTaskCreateResult>;
 
+  /**
+   * 把一个框选副屏（selection_side_chat）提升为正式任务。
+   *
+   * 不是 fork：会话 id、消息与 part 全部原样保留，只改归属（task_type -> interactive、
+   * parent_id 清空），因此副屏里已有的上下文直接变成新任务的内容。幂等——重复调用返回 null。
+   *
+   * 返回 null 表示 CAS 未命中（它本来就不是副屏，或者已经被提升过了），调用方应当刷新
+   * 列表而不是报错。成功时返回写入 tasks-index 的那份 meta，并已按 `task_created` 广播，
+   * 侧栏立刻能看到它（`task_created` 是唯一会同时让分组结构缓存失效的 reason）。
+   */
+  promoteSideChatTask(params: {
+    taskId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+    remoteSessionId?: string;
+  }): Promise<ZCodeTaskMeta | null>;
+
   /** 发送 prompt 到指定 task */
   sendPrompt(
     params: {

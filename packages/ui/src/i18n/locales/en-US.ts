@@ -2118,6 +2118,7 @@ const enUS: Record<string, string> = {
   "settings.shortcuts.command.zoomIn": "Zoom In",
   "settings.shortcuts.command.zoomOut": "Zoom Out",
   "settings.shortcuts.command.resetZoom": "Reset Zoom",
+  "settings.shortcuts.command.promoteSideChatToSession": "Promote Side Chat to Session",
   "settings.appearance.interfaceTitle": "Interface Setting",
   "settings.appearance.interfaceDescription": "Choose the app theme and interface text size.",
   "settings.appearance.codeTitle": "Code settings",

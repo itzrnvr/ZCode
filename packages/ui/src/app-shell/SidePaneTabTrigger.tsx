@@ -25,6 +25,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu.js";
 import { TabsTrigger } from "@/components/ui/tabs.js";
@@ -52,6 +53,8 @@ export function SortableSidePaneTabTrigger({
   onCloseOtherTabs,
   onCloseAllTabs,
   canCloseOtherTabs,
+  promoteTabLabel,
+  onPromoteTab,
 }: {
   tab: WorkspaceSidePaneTab;
   title: string;
@@ -66,6 +69,9 @@ export function SortableSidePaneTabTrigger({
   onCloseOtherTabs: (tabId: string) => void;
   onCloseAllTabs: () => void;
   canCloseOtherTabs: boolean;
+  /** 只对 selection-side-chat tab 提供；缺省即不渲染这一项。 */
+  promoteTabLabel?: string;
+  onPromoteTab?: (tab: Extract<WorkspaceSidePaneTab, { type: "selection-side-chat" }>) => void;
 }) {
   const wasDraggingRef = useRef(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -187,6 +193,17 @@ export function SortableSidePaneTabTrigger({
         <ContextMenuTrigger asChild>{tabTrigger}</ContextMenuTrigger>
       </SidePaneTabTitleTooltip>
       <ContextMenuContent className="w-44">
+        {tab.type === "selection-side-chat" && onPromoteTab && promoteTabLabel ? (
+          <>
+            <ContextMenuItem
+              data-side-chat-promote-trigger={tab.childSessionId}
+              onSelect={() => onPromoteTab(tab)}
+            >
+              {promoteTabLabel}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
         <ContextMenuItem onSelect={() => onCloseTab(tab.id)}>{closeTabMenuLabel}</ContextMenuItem>
         <ContextMenuItem disabled={!canCloseOtherTabs} onSelect={() => onCloseOtherTabs(tab.id)}>
           {closeOtherTabsLabel}

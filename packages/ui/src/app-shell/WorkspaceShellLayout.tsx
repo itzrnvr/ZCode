@@ -327,6 +327,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   handleCloseSidePaneTab,
   handleCloseOtherSidePaneTabs,
   handleCloseAllSidePaneTabs,
+  handlePromoteSelectionSideChatTab,
   handleReopenClosedSidePaneTab,
   handleBrowserNavigationRequestHandled,
   setIsTerminalOpen,
@@ -1458,6 +1459,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       onCloseTab={handleCloseSidePaneTab}
       onCloseOtherTabs={handleCloseOtherSidePaneTabs}
       onCloseAllTabs={handleCloseAllSidePaneTabs}
+      onPromoteTab={handlePromoteSelectionSideChatTab}
       onReopenClosedTab={handleReopenClosedSidePaneTab}
       onOpenBrowserTab={handleOpenBrowserTab}
       onOpenWhiteboard={handleOpenWhiteboard}

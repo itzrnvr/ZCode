@@ -35,7 +35,8 @@ export type ShortcutCommandId =
   | "zoomOut"
   | "resetZoom"
   | "composerSend"
-  | "composerInsertNewline";
+  | "composerInsertNewline"
+  | "promoteSideChatToSession";
 
 /**
  * 命令作用域：global = 全局分发（useAppKeyboard / 菜单 accelerator）；
@@ -97,6 +98,12 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandEntry[] = [
   },
   { id: "toggleInterfaceMode", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+u"] },
   { id: "openOnboarding", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+o"] },
+  // ── study surface（zk-kit 原生化）──
+  // 绑定是**核对过整张表 + 桌面菜单 accelerator 之后**确认空闲的：CmdOrCtrl+Shift+p 属于
+  // openCommandCenter（:65），Ctrl+Shift+m 属于 cycleSessionMode（:81），Ctrl+Shift+i 是
+  // Electron toggleDevTools 角色的默认 accelerator，三个都不能占用。
+  // 把当前正在看的副屏 tab 提升为正式会话。
+  { id: "promoteSideChatToSession", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+e"] },
 ];
 
 /** 按命令 ID 取默认绑定；未知命令返回空数组（生效表 resolve 对未知命令整体忽略）。 */

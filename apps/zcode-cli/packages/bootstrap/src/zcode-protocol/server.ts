@@ -51,6 +51,7 @@ import {
   getConversationRows,
   installConversationProjectionSink,
 } from "./conversation-rows-operation.js";
+import { promoteSessionSideChat } from "./session-promote-operation.js";
 import { listChildProcesses } from "./process-child-processes.js";
 import { ProtocolRuntimeResources } from "./runtime-resources.js";
 import {
@@ -591,6 +592,10 @@ export class ZCodeProtocolAgentServer {
         return await listSessionSubagents(this.context, request.params);
       case zcodeProtocolMethods.sessionSideChats:
         return await listSessionSideChats(this.context, request.params);
+      // 直接派发，与 sessionSideChats 同族：提升只改会话归属，不需要 v4 网关在场，
+      // 走 requireV4Gateway() 会在网关缺席时把它打成 -32603。
+      case zcodeProtocolMethods.sessionPromoteSideChat:
+        return await promoteSessionSideChat(this.context, request.params);
       case zcodeProtocolMethods.sessionRead:
         return await readSession(this.context, request.params);
       case zcodeProtocolMethods.sessionMessages:

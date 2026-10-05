@@ -10,6 +10,7 @@ import type {
   CreateSessionTaskLinkInput,
   CreateSessionInput,
   FileDiff,
+  PromoteSelectionSideChatResult,
   ForkCommitBundle,
   ForkChildSessionMetadata,
   GoalStatus,
@@ -601,6 +602,14 @@ export class SqliteSessionStore
   async updateSession(input: UpdateSessionInput): Promise<SessionInfo> {
     this.throwBeforeWrite();
     return sessionRepository.updateSession(this.db, input);
+  }
+
+  async promoteSelectionSideChat(input: {
+    id: SessionId;
+    title?: string;
+  }): Promise<PromoteSelectionSideChatResult> {
+    this.throwBeforeWrite();
+    return sessionRepository.promoteSelectionSideChat(this.db, input);
   }
 
   async getSession(sessionID: SessionId): Promise<SessionInfo | null> {

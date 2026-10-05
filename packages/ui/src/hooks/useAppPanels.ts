@@ -173,7 +173,7 @@ export function useAppPanels(options: {
   } = options;
   const supportsEmbeddedBrowser = explicitSupportsEmbeddedBrowser ?? Boolean(isDesktop);
   const activeWorkspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
-  const { zcodeAgentService, zcodeSessionService } = useServices();
+  const { zcodeAgentService, zcodeSessionService, zcodeTaskService } = useServices();
   const isOfficeMode = useIsOfficeMode();
   const sidePaneMemoryKey = useMemo(
     () =>
@@ -1441,6 +1441,42 @@ export function useAppPanels(options: {
     ],
   );
 
+  /**
+   * 把副屏 tab 提升为正式任务。
+   *
+   * 走 task facade（promoteSideChatTask）而不是直接调 agent：提升的**存储层**只是
+   * task_type/parent_id 两个字段，但用户要看到的效果是"它出现在左侧任务列表里"，
+   * 那需要 tasks-index 写入 + 分组置顶 + syncer 订阅 + task_created 广播，四件事都在
+   * host 侧，与 createTask 的收尾完全同一套。renderer 只负责发起和收 tab。
+   *
+   * 返回 null = CAS 未命中（已经不是副屏了）：调用方刷新即可，不该报错。
+   * 成功后复用既有的关闭路径收掉这个 tab——它会释放副屏 runtime 并把 tab 从面板移除，
+   * 而 rememberClosedSidePaneTabs 本来就把 selection-side-chat 排除在"最近关闭"之外，
+   * 所以提升后的会话不会以副屏身份出现在重新打开列表里。
+   */
+  const handlePromoteSelectionSideChatTab = useCallback(
+    async (tab: Extract<WorkspaceSidePaneTab, { type: "selection-side-chat" }>) => {
+      try {
+        const meta = await zcodeTaskService.promoteSideChatTask({
+          taskId: tab.childSessionId,
+          workspacePath: tab.workspacePath,
+          ...(tab.workspaceIdentity ? { workspaceIdentity: tab.workspaceIdentity } : {}),
+          ...(tab.remoteSessionId ? { remoteSessionId: tab.remoteSessionId } : {}),
+        });
+        if (!meta) return null;
+        handleCloseSidePaneTab(tab.id);
+        return meta;
+      } catch (error) {
+        logger.warn("[App] 提升框选副屏为正式任务失败", {
+          childSessionId: tab.childSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    },
+    [handleCloseSidePaneTab, zcodeTaskService],
+  );
+
   const handleCloseOtherSidePaneTabs = useCallback(
     (tabId: string) => {
       const visibleTabs =
@@ -1618,6 +1654,7 @@ export function useAppPanels(options: {
     handleReorderSidePaneTab,
     handleCloseSidePaneTab,
     handleCloseOtherSidePaneTabs,
+    handlePromoteSelectionSideChatTab,
     handleCloseAllSidePaneTabs,
     handleReopenClosedSidePaneTab,
     handleBrowserNavigationRequestHandled,

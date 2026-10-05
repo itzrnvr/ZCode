@@ -1589,6 +1589,47 @@ export const zcodeSessionSideChatsResultSchema = z
   })
   .strict();
 export type ZCodeSessionSideChatsResult = z.infer<typeof zcodeSessionSideChatsResultSchema>;
+
+/**
+ * 把一个框选副屏（`selection_side_chat`）提升为正式会话。
+ *
+ * 语义是**改归属**，不是 fork：`task_type` 翻成 `interactive`、`parent_id` 清空，
+ * 消息与 part 一行都不动，会话 id 也不变（所以副屏里已有的上下文原样保留，
+ * 而 `forkAssistant` 在副屏里仍被 commands/executor.ts 禁止——那是另一件事）。
+ * 存储层用 `task_type` 做 CAS：0 行受影响就是"已经不是副屏了"，因此这个操作幂等，
+ * 重复点击/并发点击都不会写出第二份归属。
+ *
+ * `title` 是可选的、但**必须**能改：左侧任务列表的过滤是标题制的
+ * （services/session/sideChatFilter.ts 的 `excludeSideChats` 只认 "Selection side chat"
+ * 这个字面量），只翻 task_type 的话，提升后的会话会被写进 tasks-index 再被同一个过滤器
+ * 原样滤掉，用户看到的就是"点了没反应"。调用方（services 的 task adapter）用
+ * `resolveZCodeVisibleSessionTitle` 从首条真实用户输入派生标题后一起传下来。
+ */
+export const zcodeSessionPromoteSideChatParamsSchema = z
+  .object({
+    sessionId: nonEmptyString,
+    /** 提升时一并写入的标题；缺省则保留原标题（调用方需自行确认它不是副屏占位标题）。 */
+    title: nonEmptyString.optional(),
+  })
+  .strict();
+export type ZCodeSessionPromoteSideChatParams = z.infer<
+  typeof zcodeSessionPromoteSideChatParamsSchema
+>;
+
+export const zcodeSessionPromoteSideChatResultSchema = z
+  .object({
+    /** false = CAS 未命中：这个会话不是副屏，或者已经被提升过了。幂等，不是错误。 */
+    promoted: z.boolean(),
+    sessionId: nonEmptyString,
+    /** 提升后存储层里的标题；`promoted: false` 时是当前的真实标题（可能仍是占位标题）。 */
+    title: z.string().nullable(),
+    /** 提升后这个会话在存储层里的 task_type，供调用方核对而不是自己再查一次。 */
+    taskType: z.string().nullable(),
+  })
+  .strict();
+export type ZCodeSessionPromoteSideChatResult = z.infer<
+  typeof zcodeSessionPromoteSideChatResultSchema
+>;
 export const zcodeSessionCreateParamsSchema = z
   .object({
     sessionId: nonEmptyString.optional(),
@@ -3678,6 +3719,7 @@ export const zcodeProtocolMethods = {
   sessionList: "session/list",
   sessionSubagents: "session/subagents",
   sessionSideChats: "session/sideChats",
+  sessionPromoteSideChat: "session/promoteSideChat",
   sessionRequestRuntimePreferences: "session/requestRuntimePreferences",
   sessionRead: "session/read",
   sessionMessages: "session/messages",

@@ -57,6 +57,7 @@ import type {
   ZCodeSessionStateSnapshot,
   ZCodeSessionSubagentsResult,
   ZCodeSessionSideChatsResult,
+  ZCodeSessionPromoteSideChatResult,
   ZCodeStateUpdatedNotification,
   ZCodeTaskClientMode,
   ZCodeBrowserAmbientContext,
@@ -226,6 +227,19 @@ export interface ZCodeAgentListSessionSubagentsParams extends ZCodeAgentSessionT
 /** 框选副屏目录查询；只读，不激活 runtime（issue #38）。 */
 export interface ZCodeAgentListSessionSideChatsParams extends ZCodeAgentSessionTarget {
   limit?: number;
+  /** 远程 workspace 的宿主连接身份；只用于选择现有 Host，不进入 CLI wire query。 */
+  remoteSessionId?: string;
+}
+
+/**
+ * 把框选副屏提升为正式会话（改归属，不是 fork）。
+ *
+ * `title` 可选但强烈建议传：左侧任务列表的 `excludeSideChats` 是标题制的（只认字面量
+ * "Selection side chat"），只翻 task_type 会让提升后的会话进了 tasks-index 又被同一个过滤器
+ * 滤掉。task adapter 用 resolveZCodeVisibleSessionTitle 从首条真实用户输入派生标题后传下来。
+ */
+export interface ZCodeAgentPromoteSessionSideChatParams extends ZCodeAgentSessionTarget {
+  title?: string;
   /** 远程 workspace 的宿主连接身份；只用于选择现有 Host，不进入 CLI wire query。 */
   remoteSessionId?: string;
 }
@@ -623,6 +637,10 @@ export interface IZCodeAgentService {
   listSessionSideChats(
     params: ZCodeAgentListSessionSideChatsParams,
   ): Promise<ZCodeSessionSideChatsResult>;
+  /** 提升副屏为正式会话：写操作，幂等（CAS 未命中时 promoted=false，不是错误）。 */
+  promoteSessionSideChat(
+    params: ZCodeAgentPromoteSessionSideChatParams,
+  ): Promise<ZCodeSessionPromoteSideChatResult>;
   getAppUsageStats(params: ZCodeAgentAppUsageParams): Promise<AppUsageSnapshot>;
   getTaskTokenUsage(params: ZCodeAgentTaskTokenUsageParams): Promise<ZCodeTaskTokenUsageResult>;
   readSession(params: ZCodeAgentReadSessionParams): Promise<ZCodeSessionStateSnapshot>;

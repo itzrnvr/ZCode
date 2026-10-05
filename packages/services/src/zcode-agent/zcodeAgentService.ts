@@ -84,6 +84,7 @@ import {
   zcodeSessionListResultSchema,
   zcodeSessionSubagentsResultSchema,
   zcodeSessionSideChatsResultSchema,
+  zcodeSessionPromoteSideChatResultSchema,
   zcodeSessionMessagesResultSchema,
   zcodeSessionEventSchema,
   zcodeSessionSendResultSchema,
@@ -159,6 +160,7 @@ import type {
   ZCodeAgentListSessionsParams,
   ZCodeAgentListSessionSubagentsParams,
   ZCodeAgentListSessionSideChatsParams,
+  ZCodeAgentPromoteSessionSideChatParams,
   ZCodeAgentReadWorkspacePresentationParams,
   ZCodeAgentSystemPromptPreviewParams,
   ZCodeAgentReadSessionEventsParams,
@@ -3662,6 +3664,21 @@ export function createZCodeAgentService(
           limit: params.limit ?? 20,
         },
         zcodeSessionSideChatsResultSchema,
+      );
+    },
+
+    async promoteSessionSideChat(params: ZCodeAgentPromoteSessionSideChatParams) {
+      // 写操作：用 getClient 而不是 getReadOnlyClient。只读客户端允许 "existing-only"
+      // 的宿主策略，提升必须落到存储层，宿主不在场时要能拉起来（与 sessionCreate /
+      // sessionResume / setModel 这些变更操作同一约定）。
+      const client = await getClient(params);
+      return client.request(
+        zcodeProtocolMethods.sessionPromoteSideChat,
+        {
+          sessionId: params.sessionId,
+          ...(params.title !== undefined ? { title: params.title } : {}),
+        },
+        zcodeSessionPromoteSideChatResultSchema,
       );
     },
 

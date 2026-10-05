@@ -5,6 +5,7 @@ import {
   type CreateSessionInput,
   type FileDiff,
   type ListSessionsInput,
+  type PromoteSelectionSideChatResult,
   type RepairLegacyRemoteSessionWorkspaceInput,
   type RepairRemoteSessionPathsInput,
   type SessionId,
@@ -309,6 +310,42 @@ export function repairRemoteSessionPaths(
       input.expectedPath,
     );
   return Number(result.changes) === 1;
+}
+
+/**
+ * 把框选副屏提升为正式会话（`task_type` -> interactive，`parent_id` -> null）。
+ *
+ * 形状照 `repairRemoteSessionPaths`：单条窄 UPDATE + CAS，**不复用** `updateSession`。
+ * 全字段 writer 会把读取快照里的标题/权限/归档状态盖到并发新值上，而提升只拥有归属字段。
+ * `where ... and task_type = 'selection_side_chat'` 就是 CAS：0 行受影响 = 不是副屏或已经
+ * 提升过，返回 `promoted: false`，因此重复点击是幂等的。
+ *
+ * **故意不动 `time_updated`**：conversation projection 的 revision 是
+ * `time_updated:watermark:schemaVersion`，而提升不碰任何 message/part（水位只在四个
+ * message/part mutator 里推进）。动了它只会让下一次 v4/conversation/rows 快路径白返回一次
+ * `reason:"stale"` 并触发一次整会话重折叠——22515 part 的会话上那是秒级开销，换来的收益是零。
+ *
+ * 标题可选但必须能改：左侧任务列表的 `excludeSideChats` 是**标题制**的（只认字面量
+ * "Selection side chat"），只翻 task_type 会让提升后的会话进了 tasks-index 又被同一个过滤器
+ * 滤掉，用户看到的就是"点了没反应"。
+ */
+export function promoteSelectionSideChat(
+  db: DatabaseSync,
+  input: { id: SessionId; title?: string },
+): PromoteSelectionSideChatResult {
+  const hasTitle = typeof input.title === "string" && input.title.trim().length > 0;
+  const result = db
+    .prepare(
+      hasTitle
+        ? `update session
+           set task_type = 'interactive', parent_id = null, title = ?
+           where id = ? and task_type = 'selection_side_chat'`
+        : `update session
+           set task_type = 'interactive', parent_id = null
+           where id = ? and task_type = 'selection_side_chat'`,
+    )
+    .run(...((hasTitle ? [input.title, input.id] : [input.id]) as SQLInputValue[]));
+  return { promoted: Number(result.changes) === 1, session: getSession(db, input.id) };
 }
 
 export async function setRevert(

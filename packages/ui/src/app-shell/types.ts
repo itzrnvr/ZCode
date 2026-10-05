@@ -27,6 +27,7 @@ import type {
   OpenScopedWorkflowArtifactSideTabRequest,
   OpenScopedWorkflowWorkspaceSideTabRequest,
   WorkspaceSidePaneState,
+  WorkspaceSidePaneTab,
 } from "@/lib/workspaceSidePane.js";
 import type { TreemappingSidePaneTab } from "@/lib/workspaceSidePane.js";
 import type { WorkspaceZCodeUIState } from "@/store/zcodeSessionStore.js";
@@ -268,6 +269,10 @@ export interface WorkspaceShellLayoutProps extends Omit<AppProps, "baseFeedbackS
   handleCloseSidePaneTab: (tabId: string) => void;
   handleCloseOtherSidePaneTabs: (tabId: string) => void;
   handleCloseAllSidePaneTabs: () => void;
+  /** 把框选副屏 tab 提升为正式任务（右键菜单 + 快捷键共用同一条路径）。 */
+  handlePromoteSelectionSideChatTab: (
+    tab: Extract<WorkspaceSidePaneTab, { type: "selection-side-chat" }>,
+  ) => Promise<ZCodeTaskMeta | null>;
   handleReopenClosedSidePaneTab: (tabId: string) => void;
   handleBrowserNavigationRequestHandled: (requestId: string) => void;
   setIsTerminalOpen: (open: boolean) => void;
