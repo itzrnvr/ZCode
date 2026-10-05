@@ -63,11 +63,15 @@ export function useActiveTaskSnapshotMeta(
     void zcodeSessionService
       // active header 只需要 session meta/标题兜底，走 ZCode Protocol 的轻量读取，
       // 避免继续经 legacy snapshot 把大任务消息整包拉回 UI。
+      // existing-only：默认 runtimePolicy 会在 runtime 被回收后重新拉起 Agent（见
+      // zcodeAgentService.readSession 的注释），而这里只是标题兜底——冷会话读不到就
+      // 回落列表 meta，绝不能为了一个标题把 activation 塞回首行关键路径。
       .readSession({
         workspacePath,
         workspaceIdentity,
         sessionId: taskId,
         messageLimit: 1,
+        runtimePolicy: "existing-only",
       })
       .then((snapshot) => {
         if (cancelled) {

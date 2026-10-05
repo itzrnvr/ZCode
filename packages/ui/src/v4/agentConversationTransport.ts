@@ -122,7 +122,6 @@ export function createAgentConversationTransport(
   };
   const ensureHandshake = async () => {
     const hello = await ensureAgentV4ConnectionHandshake(agentService);
-    calibrate();
     return hello;
   };
   const listeners = new Set<
@@ -253,6 +252,9 @@ export function createAgentConversationTransport(
           subscriptionId: result.ack.subscriptionId,
           topic: params.topic,
         });
+        // TTFT 校准从 ensureHandshake 挪到 ACK 之后：校准是一条 commands/query 请求，
+        // 在握手里调用会抢在 subscribe 之前占用串行车道；首帧到达时帧钩子还会再校准。
+        calibrate();
         return result;
       } catch (error) {
         if (pending) barrier.cancel(pending);

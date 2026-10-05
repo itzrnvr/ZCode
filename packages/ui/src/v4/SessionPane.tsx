@@ -1823,6 +1823,9 @@ export function SessionPane({
     // 直播冻结在「已工作 xx 秒」。只读 pane 也不消费 join 回退与任务列表页脚，直接关掉。
     enabled: !readOnly,
     live: state.status === "live",
+    // 首帧闸门：journal 发现查询会触发 activation 并抢在 subscribe 之前占住串行车道，
+    // 把冷视图物化挤下去（实测冷开 11.2s 里 activation 4.66s 且 coldResume 恒为 false）。
+    ready: snapshot !== null && snapshot !== undefined,
     limit: WORKFLOW_RUN_DIRECTORY_LIMIT,
     refreshKey: workflowRunDirectoryRefreshKey(snapshot?.workflowRuns?.runs),
   });
@@ -3871,7 +3874,9 @@ export function SessionPane({
     sessionId,
     workspacePath,
     // 会话推进（新建/结束副屏）即刷新活跃态；不做常驻轮询。
-    refreshKey: snapshot?.seq ?? null,
+    // 粗粒度刷新键：snapshot.seq 每个 delta batch 都抬升，流式期间会把
+    // listSessionSideChats 打成每帧一条、长期排在串行车道上；logEpoch 只在 epoch 变更时抬升。
+    refreshKey: snapshot?.logEpoch ?? null,
     ...(workspaceIdentity ? { workspaceIdentity } : {}),
     ...(remoteSessionId ? { remoteSessionId } : {}),
   });

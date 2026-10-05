@@ -59,9 +59,16 @@ export function useWorkflowRunJournalSummaries(options: {
   /** 缺省不带这个键，条数由 CLI 侧裁决（缺省 16 / 上限 64）。 */
   limit?: number;
   refreshKey?: number | string;
+  /**
+   * 首帧闸门：缺省 true。SessionPane 传 snapshot 是否已落地——journal 发现查询会经
+   * ensureHostRecordForJournalRead 触发 activation（实测 3.6-4.6s），而它声明在 subscribe
+   * effect 之前、CLI 又严格串行派发，于是必然抢在冷视图物化之前占住车道。等首帧再问，
+   * activation 就落在首行之后；目录侧面板不传此键，行为不变。
+   */
+  ready?: boolean;
 }): readonly V4ConversationWorkflowRunSummary[] | null {
   const { workflowRuns } = useV4Conversation();
-  const { enabled = true, limit, live, refreshKey, sessionId } = options;
+  const { enabled = true, limit, live, ready = true, refreshKey, sessionId } = options;
   const [summaries, setSummaries] = useState<readonly V4ConversationWorkflowRunSummary[] | null>(
     null,
   );
@@ -89,7 +96,7 @@ export function useWorkflowRunJournalSummaries(options: {
   const capabilityMissingSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!enabled || !sessionId) {
+    if (!enabled || !sessionId || !ready) {
       setSummaries(null);
       return;
     }
@@ -131,7 +138,7 @@ export function useWorkflowRunJournalSummaries(options: {
     return () => {
       alive = false;
     };
-  }, [enabled, limit, live, refreshKey, sessionId, workflowRuns]);
+  }, [enabled, limit, live, ready, refreshKey, sessionId, workflowRuns]);
 
   return summaries;
 }

@@ -17,6 +17,7 @@ import type {
   ZCodeStateUpdatedNotification,
   ZCodeWorkspacePresentation,
 } from "@zcode/shared";
+import type { ZCodeAgentRuntimePolicy } from "../zcode-agent/zcodeAgent.js";
 import { createServiceDescriptor } from "#src/descriptors.js";
 
 export interface ZCodeSessionWorkspaceTarget {
@@ -143,7 +144,9 @@ export interface IZCodeSessionService {
   createSession(params: ZCodeSessionCreateParams): Promise<ZCodeSessionStateSnapshot>;
   resumeSession(params: ZCodeSessionResumeParams): Promise<ZCodeSessionStateSnapshot>;
   listSessions(params: ZCodeSessionListParams): Promise<ZCodeSessionInfo[]>;
-  readSession(params: ZCodeSessionReadParams): Promise<ZCodeSessionStateSnapshot>;
+  readSession(
+    params: ZCodeSessionReadParams & { runtimePolicy?: ZCodeAgentRuntimePolicy },
+  ): Promise<ZCodeSessionStateSnapshot>;
   readSessionMessages(params: ZCodeSessionMessagesParams): Promise<ZCodeMessageWithParts[]>;
   readSessionEvents(params: ZCodeSessionEventsParams): Promise<ZCodeSessionEvent[]>;
   promoteDeferredDraftSession(params: ZCodeTaskTarget): Promise<void>;
