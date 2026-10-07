@@ -37,6 +37,7 @@ import {
   describeZCodePlugin,
   getZCodePluginsOverview,
   installZCodeMarketplacePlugin,
+  loadPluginListingsById,
   removeZCodePluginMarketplace,
   resolveZCodePlugins,
   resetZCodePluginConfig,
@@ -54,7 +55,14 @@ import { createConfig, resolvePath, type ConfigResult } from "@zcode/adapters/co
 import { parseParams, type ZCodeProtocolAgentServerContext } from "./server-types.js";
 
 // 把 CLI 的 PluginMetadata 投影成协议可序列化的 ZCodePluginInfo (只保留 UI 需要的字段)。
-function toPluginInfo(plugin: PluginMetadata, configResult?: ConfigResult): ZCodePluginInfo {
+// listing 由调用方按完整 plugin id 传入（adapter 的运行时 PluginMetadata 故意不携带展示元数据），
+// 缺失时整个字段省略，UI 继续走 resolvePluginDisplayName 的 slug 降级。
+// 导出仅为单测：投影是纯函数，直接对着它断言比驱动整条协议 handler 更能钉住字段丢失。
+export function toPluginInfo(
+  plugin: PluginMetadata,
+  configResult?: ConfigResult,
+  listing?: ZCodePluginInfo["listing"],
+): ZCodePluginInfo {
   const hostMcpServerNames = resolveOfficialPluginHostMcpServerNames(plugin.id);
   const configuredOptions = Object.fromEntries(
     Object.entries(plugin.configuredOptions ?? {}).filter(
@@ -75,6 +83,7 @@ function toPluginInfo(plugin: PluginMetadata, configResult?: ConfigResult): ZCod
     enabled: plugin.enabled,
     source: plugin.source,
     marketplace: plugin.marketplace,
+    ...(listing ? { listing } : {}),
     // manifest 的作者/主页回退字段（商店 listing 优先）。
     ...(plugin.author !== undefined ? { author: plugin.author } : {}),
     ...(plugin.authorUrl !== undefined ? { authorUrl: plugin.authorUrl } : {}),
@@ -213,7 +222,15 @@ export async function listPlugins(
     logger: context.logger,
     workingDirectory: params.workspace.workspacePath,
   });
-  const plugins = outcome.plugins.map((plugin) => toPluginInfo(plugin, configResult));
+  // 目录条目 + official definition seed 一次性解析成 id -> listing：内置插件在裁剪构建里
+  // 没有 bundled 目录条目，只有 definition seed 能提供 displayName/icon/描述 i18n，
+  // 少了它已发现的 documents/pdf/presentations/spreadsheets 在商店里只能显示 slug。
+  const listingsById = loadPluginListingsById(
+    resolvePluginStorageRoot(params.workspace.workspacePath),
+  );
+  const plugins = outcome.plugins.map((plugin) =>
+    toPluginInfo(plugin, configResult, listingsById[plugin.id]),
+  );
   return {
     plugins: [
       ...plugins,
@@ -242,9 +259,14 @@ export async function setPluginEnabled(
   });
   // 启用配置写入当前不可回滚；若取消在 IO 期间到达，只阻断后续响应和 UI 写入。
   abortSignal?.throwIfAborted();
+  // 启停响应同样带 listing：商店/管理页用它就地更新条目，缺失会让显示名在响应到达后
+  // 退回 slug，直到下一次 plugins/list 才恢复。
+  const listing = loadPluginListingsById(
+    resolvePluginStorageRoot(params.workspace.workspacePath),
+  )[result.plugin.id];
   return {
     plugin: {
-      ...toPluginInfo(result.plugin),
+      ...toPluginInfo(result.plugin, undefined, listing),
       enabledSource: params.scope ?? "user",
     },
     enabled: result.enabled,

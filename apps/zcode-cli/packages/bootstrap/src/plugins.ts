@@ -413,7 +413,15 @@ export function listZCodePlugins(options: ListZCodePluginsOptions = {}): PluginL
   };
 }
 
-function loadPluginListingsById(storageRoot: string): Record<string, PluginStoreListing> {
+/**
+ * 按完整 `${name}@${marketplace}` 解析商店 listing：official definition 的 seed 先铺底，
+ * 再被各 marketplace 目录条目覆盖（同名时 CDN 分片优先，与 rebuildOfficialMarketplaceSync
+ * 的合并口径一致）。
+ *
+ * 导出给协议层的 plugins/list：内置插件在裁剪构建里没有 bundled 目录条目，只有 definition
+ * seed 能提供 displayName/icon/描述 i18n，缺了它 UI 只能显示 slug。
+ */
+export function loadPluginListingsById(storageRoot: string): Record<string, PluginStoreListing> {
   const listings = new Map<string, PluginStoreListing>();
 
   // 没有 marketplace 快照时，bundled official definition 仍是内置插件 listing 的安全回退。

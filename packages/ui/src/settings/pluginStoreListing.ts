@@ -289,6 +289,12 @@ export function buildStoreItems(input: {
         info.source === "cache" &&
         !marketplaceIds.has(info.marketplace),
       info,
+      // 运行时信息带来的 listing 必须提升成条目级 listing：resolveItemDisplayName /
+      // resolveItemDescription / 卡片图标都只读 item.listing。内置插件（documents/pdf/
+      // presentations/spreadsheets）在裁剪构建里没有目录条目，走的正是这条 discovered 分支，
+      // 不提升就只能显示 slug 且没有图标与描述。目录条目已在上面两个循环里优先落位，
+      // 这里不会覆盖它们。
+      ...(info.listing ? { listing: info.listing } : {}),
       ...(metaById.get(info.id) ? { installedMeta: metaById.get(info.id) } : {}),
     });
   }

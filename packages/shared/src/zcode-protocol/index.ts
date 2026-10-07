@@ -2664,7 +2664,8 @@ export const zcodePluginUserConfigOptionSchema = z
 export type ZCodePluginUserConfigOption = z.infer<typeof zcodePluginUserConfigOptionSchema>;
 
 // 组件类型与详情弹窗/市场详情共用的分组顺序保持一致：agent / command / skill / hook / mcp。
-// 注意：这三个 schema 必须定义在 zcodePluginInfoSchema 之前，因为后者（.strict()）的 components 字段引用了它们。
+// 注意：这三个 schema 必须定义在 zcodePluginInfoSchema 之前，因为后者（.strict()）的 components 字段引用了它们；
+// 下面紧跟的 zcodePluginStoreListingSchema 同理（listing 字段引用它），一并前置。
 export const zcodePluginComponentKindSchema = z.enum(["agent", "command", "skill", "hook", "mcp"]);
 export type ZCodePluginComponentKind = z.infer<typeof zcodePluginComponentKindSchema>;
 
@@ -2682,6 +2683,34 @@ export const zcodePluginComponentGroupSchema = z
   })
   .strict();
 export type ZCodePluginComponentGroup = z.infer<typeof zcodePluginComponentGroupSchema>;
+
+// 商店信息（Store Listing）：目录条目携带的展示性元数据（显示名/icon/分类/作者/链接/hero/
+// 示例提示词），全部可选，UI 缺失时按降级矩阵处理（字母头像/隐藏区块/省略信息行）。
+// i18n 采用 `<字段>I18n` map，locale 解析复用 shared 的 plugin-display-name helper。
+export const zcodePluginStoreListingSchema = z
+  .object({
+    displayName: z.string().optional(),
+    displayNameI18n: z.record(z.string(), z.string()).optional(),
+    descriptionI18n: z.record(z.string(), z.string()).optional(),
+    icon: z.string().optional(),
+    category: z.string().optional(),
+    author: z.string().optional(),
+    authorUrl: z.string().optional(),
+    homepage: z.string().optional(),
+    privacyPolicy: z.string().optional(),
+    termsOfService: z.string().optional(),
+    heroImage: z.string().optional(),
+    examplePrompts: z.array(z.string()).optional(),
+    examplePromptsI18n: z.record(z.string(), z.array(z.string())).optional(),
+    /**
+     * 需要付费套餐才好用的插件：市场目录条目声明 `requiresPaidPlan: true`，
+     * UI 在标题右侧展示提示图标。描述的是「使用条件」而非「插件是收费商品」——
+     * 不参与安装门禁与计费，命名也不绑定具体套餐商品名。
+     */
+    requiresPaidPlan: z.boolean().optional(),
+  })
+  .strict();
+export type ZCodePluginStoreListing = z.infer<typeof zcodePluginStoreListingSchema>;
 
 export const zcodePluginInfoSchema = z
   .object({
@@ -2714,6 +2743,11 @@ export const zcodePluginInfoSchema = z
     rootSource: zcodePluginScopeSchema.optional(),
     enabledSource: zcodePluginScopeSchema.optional(),
     optionSources: z.record(z.string(), zcodePluginScopeSchema).optional(),
+    // 商店信息（显示名/icon/描述 i18n/分类/作者）。目录条目是它的第一来源，内置插件在本构建
+    // 没有 seed 源时改由 official definition 的 listing seed 兜底——否则已发现的内置插件
+    // 在商店/管理页只能显示 slug（documents）而不是 Documents/文档，图标与描述也一并丢失。
+    // optional 兼容旧 payload；UI 缺失时仍按 resolvePluginDisplayName 的降级矩阵走 slug。
+    listing: zcodePluginStoreListingSchema.optional(),
   })
   .strict();
 export type ZCodePluginInfo = z.infer<typeof zcodePluginInfoSchema>;
@@ -3148,34 +3182,6 @@ export const zcodePluginsSetEnabledResultSchema = z
   })
   .strict();
 export type ZCodePluginsSetEnabledResult = z.infer<typeof zcodePluginsSetEnabledResultSchema>;
-
-// 商店信息（Store Listing）：目录条目携带的展示性元数据（显示名/icon/分类/作者/链接/hero/
-// 示例提示词），全部可选，UI 缺失时按降级矩阵处理（字母头像/隐藏区块/省略信息行）。
-// i18n 采用 `<字段>I18n` map，locale 解析复用 shared 的 plugin-display-name helper。
-export const zcodePluginStoreListingSchema = z
-  .object({
-    displayName: z.string().optional(),
-    displayNameI18n: z.record(z.string(), z.string()).optional(),
-    descriptionI18n: z.record(z.string(), z.string()).optional(),
-    icon: z.string().optional(),
-    category: z.string().optional(),
-    author: z.string().optional(),
-    authorUrl: z.string().optional(),
-    homepage: z.string().optional(),
-    privacyPolicy: z.string().optional(),
-    termsOfService: z.string().optional(),
-    heroImage: z.string().optional(),
-    examplePrompts: z.array(z.string()).optional(),
-    examplePromptsI18n: z.record(z.string(), z.array(z.string())).optional(),
-    /**
-     * 需要付费套餐才好用的插件：市场目录条目声明 `requiresPaidPlan: true`，
-     * UI 在标题右侧展示提示图标。描述的是「使用条件」而非「插件是收费商品」——
-     * 不参与安装门禁与计费，命名也不绑定具体套餐商品名。
-     */
-    requiresPaidPlan: z.boolean().optional(),
-  })
-  .strict();
-export type ZCodePluginStoreListing = z.infer<typeof zcodePluginStoreListingSchema>;
 
 export const zcodePluginsResolveSuggestedReferenceResultSchema = z
   .object({

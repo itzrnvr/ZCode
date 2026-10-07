@@ -88,12 +88,22 @@ interface SeaOfficialPluginManifest {
 
 type SeaModule = typeof import("node:sea");
 
+interface OfficialPluginSeedOutcome {
+  /**
+   * 本次构建真正拿到 seed 源（filesystem/SEA）的定义名。写入成功与降级失败都算「已处理」，
+   * 二者都在 failedSeeds 或缓存里留下痕迹；不在这个集合里的定义说明本构建根本没有它的
+   * plugin package，只能复用磁盘上已有的官方缓存。
+   */
+  sourcedNames: Set<string>;
+  failedSeeds: OfficialPluginDefinition[];
+}
+
 function seedBundledOfficialPlugins(input: {
   logger?: Logger;
   storageRoot: string;
-}): OfficialPluginDefinition[] {
+}): OfficialPluginSeedOutcome {
   const source = resolveSeedSource();
-  if (!source) return [];
+  if (!source) return { failedSeeds: [], sourcedNames: new Set() };
 
   // Catalog/cache 是内置插件的不可变产品资产；Runtime 是否加载由 discovery 的抑制态决定，
   // 不能在 seed 阶段删除或过滤，否则卸载后详情页无法读取组件，也无法恢复。
@@ -207,7 +217,10 @@ function seedBundledOfficialPlugins(input: {
       throw error;
     }
   }
-  return failedSeeds;
+  return {
+    failedSeeds,
+    sourcedNames: new Set(source.plugins.map((plugin) => plugin.definition.name)),
+  };
 }
 
 function tryWriteOfficialPluginRuntimeManifest(input: {
@@ -237,21 +250,54 @@ export function resolveOfficialPluginRoots(input: {
   if (!isZCodeCuaInternalFeatureEnabled(input.env ?? process.env)) {
     suppressedBuiltins.add(ZCODE_CUA_OFFICIAL_PLUGIN_ID);
   }
-  const failedSeeds = seedBundledOfficialPlugins({
+  const seed = seedBundledOfficialPlugins({
     logger: input.logger,
     storageRoot: input.storageRoot,
   });
 
-  const fallbackRoots = failedSeeds.flatMap((definition) => {
+  const fallbackRoots = seed.failedSeeds.flatMap((definition) => {
     // CUA 的 frame contract 随 wrapper 与 producer 原子升级。加载旧版本
     // cache 会把旧 block 布局接到新 consumer 上；当前 cache 不可用时宁可不注册 CUA。
-    if (`${definition.name}@${OFFICIAL_PLUGIN_MARKETPLACE}` === ZCODE_CUA_OFFICIAL_PLUGIN_ID) {
-      return [];
-    }
+    if (isCuaDefinition(definition)) return [];
     const fallbackRoot = findUsableOfficialPluginFallback(input.storageRoot, definition);
     return fallbackRoot ? [fallbackRoot] : [];
   });
-  return uniquePaths([...(input.extraRoots ?? []), ...fallbackRoots]);
+
+  // 裁剪构建（fork/桌面包只 stage 了部分 `*-plugin` package）里，缺 package 的定义拿不到 seed
+  // 源：既不写缓存也不进 failedSeeds，于是 discovery 的两条官方候选路径同时失效——
+  // scanOfficialCache 只认 bundled 分片里列出的 cachePath，officialPluginRoots 也没有它。
+  // 后果是 documents/pdf/presentations/spreadsheets 这类 defaultEnabled 内置插件从插件列表和
+  // 商店里整体消失：用户配置里没有它们的声明，`enabledPlugins[id] ?? defaultEnabled` 那条
+  // 默认开启路径根本走不到；又因为没被 suppressed，restorableBuiltins 也不收它们，
+  // 用户没有任何入口能把它们拿回来。官方 cache 里已有的可用版本是这类定义唯一的资产来源。
+  const unseededRoots = OFFICIAL_PLUGIN_DEFINITIONS.filter(
+    (definition) => !seed.sourcedNames.has(definition.name),
+  ).flatMap((definition) => {
+    if (isCuaDefinition(definition)) return [];
+    const cachedRoot = resolveUsableOfficialPluginCacheRoot(input.storageRoot, definition);
+    return cachedRoot ? [cachedRoot] : [];
+  });
+
+  return uniquePaths([...(input.extraRoots ?? []), ...fallbackRoots, ...unseededRoots]);
+}
+
+function isCuaDefinition(definition: Pick<OfficialPluginDefinition, "name">): boolean {
+  return `${definition.name}@${OFFICIAL_PLUGIN_MARKETPLACE}` === ZCODE_CUA_OFFICIAL_PLUGIN_ID;
+}
+
+/**
+ * 定位「本构建没有 seed 源」的官方插件可用缓存：先按定义 pin 的版本，不可用再退到最高旧版本。
+ * 与 findUsableOfficialPluginFallback 的分工：后者服务 seed 失败（pinned 版本可用时返回
+ * undefined，表示无需回退），这里 pinned 版本可用时就是要它本身——本构建从未写过这个缓存，
+ * 不存在「升级中」的语义。版本仍按定义 pin，避免官方回滚时误载更高版本的旧缓存。
+ */
+function resolveUsableOfficialPluginCacheRoot(
+  storageRoot: string,
+  definition: OfficialPluginDefinition,
+): string | undefined {
+  const targetRoot = officialPluginCacheRoot(storageRoot, definition);
+  if (isSeedUsable(targetRoot, definition)) return targetRoot;
+  return findUsableOfficialPluginFallback(storageRoot, definition);
 }
 
 function resolveSeedSource(): OfficialPluginSeedSource | undefined {
