@@ -266,6 +266,8 @@ export interface RealChromeRelayServerDeps {
   token?: string;
   client: RealChromeRelayClient;
   log?: (message: string, extra?: Record<string, unknown>) => void;
+  /** bind 失败（EADDRINUSE 等）的异步通知；不抛，host 不炸。 */
+  onError?: (error: unknown) => void;
 }
 
 export interface RealChromeRelayServer {
@@ -274,14 +276,24 @@ export interface RealChromeRelayServer {
 }
 
 /**
- * 本地 ws 服务：extension 主动连上来（它连 host，不是 host 连它——用户 Chrome
- * 常开，host 侧随窗口启停，不能反向依赖用户进程的端口）。只绑 127.0.0.1。
- * 路径只接受 /ext（与 OMP relay 同形，复用用户已装的 extension）；token 对上才接。
+ * 本地 ws 服务：extension 主动连上来（它连 host，不是 host 连它）。只绑 127.0.0.1。
+ * 路径只接受 /ext；token 对上才接。
+ *
+ * EADDRINUSE 是预期的常见态（用户跑着 omp relay daemon 占 9224）：bind 失败走
+ * error 事件 + onError 回调，不抛、不炸 host。ws 的 listen 错误是异步的，
+ * 调用方的 try/catch 包不住，必须走事件。
  */
 export function startRealChromeRelayServer(deps: RealChromeRelayServerDeps): RealChromeRelayServer {
   const port = deps.port ?? 9224;
   const log = deps.log ?? (() => {});
   const server = new WebSocketServer({ host: "127.0.0.1", port });
+  server.on("error", (error: unknown) => {
+    log("[real-chrome] relay server unavailable (port in use?)", {
+      port,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    deps.onError?.(error);
+  });
   server.on("connection", (socket: WebSocket, request: { url?: string }) => {
     const url = request?.url ?? "";
     if (!url.startsWith("/ext")) {
