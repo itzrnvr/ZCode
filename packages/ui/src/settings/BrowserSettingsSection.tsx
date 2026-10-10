@@ -31,9 +31,7 @@ const OFFICIAL_BROWSER_USE_PLUGIN_ID = "browser-use@zcode-plugins-official";
 
 interface BrowserSettingsSectionProps {
   isDesktop: boolean;
-  isWindowsDesktop?: boolean;
   workspacePath?: string | null;
-  workspaceIdentity?: string;
   embeddedBrowserAllowInsecureCertificates?: boolean;
   onEmbeddedBrowserAllowInsecureCertificatesChange?: (enabled: boolean) => Promise<void>;
 }
@@ -73,7 +71,6 @@ function BrowserOperationButton({
 
 export function BrowserSettingsSection({
   isDesktop,
-  isWindowsDesktop = false,
   workspacePath,
   workspaceIdentity,
   embeddedBrowserAllowInsecureCertificates = false,
@@ -267,34 +264,31 @@ export function BrowserSettingsSection({
               ) : undefined
             }
           />
-          {/* 导入登录状态是“开启内置浏览器控制”之后的配套动作，与开关同卡片表达先后关系；
-              清除类破坏性操作仍留在“浏览器数据”分组。
-              Windows App-Bound 导入链路暂未开放，先隐藏入口但保留底层实现和清理能力。*/}
-          {!isWindowsDesktop ? (
-            <SettingsRow
-              label={intl.formatMessage({ id: "settings.browser.import.title" })}
-              description={intl.formatMessage({
-                id: "settings.browser.import.description",
-              })}
-              control={
-                <BrowserOperationButton
-                  operation="import"
-                  pendingOperation={pendingOperation}
-                  disabled={operationDisabled}
-                  onClick={() => void handleImport()}
-                >
-                  {intl.formatMessage({ id: "settings.browser.import.action" })}
-                </BrowserOperationButton>
-              }
-              detail={
-                lastImportResult ? (
-                  <div className="text-ui-base text-foreground-subtle">
-                    {formatImportSummary(lastImportResult, intl.formatMessage)}
-                  </div>
-                ) : undefined
-              }
-            />
-          ) : null}
+          {/* 全量导入（Cookie/密码/历史/书签/站点数据）Windows 已就绪：App-Bound
+              经 helper + 本次显式 UAC 解；密码经 DPAPI 本机解。入口不再按平台隐藏。 */}
+          <SettingsRow
+            label={intl.formatMessage({ id: "settings.browser.import.title" })}
+            description={intl.formatMessage({
+              id: "settings.browser.import.description",
+            })}
+            control={
+              <BrowserOperationButton
+                operation="import"
+                pendingOperation={pendingOperation}
+                disabled={operationDisabled}
+                onClick={() => void handleImport()}
+              >
+                {intl.formatMessage({ id: "settings.browser.import.action" })}
+              </BrowserOperationButton>
+            }
+            detail={
+              lastImportResult ? (
+                <div className="text-ui-base text-foreground-subtle">
+                  {formatImportSummary(lastImportResult, intl.formatMessage)}
+                </div>
+              ) : undefined
+            }
+          />
         </SettingsGroupCard>
       </section>
 

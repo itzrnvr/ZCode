@@ -2518,10 +2518,10 @@ const enUS: Record<string, string> = {
     "Certificate setting saved. Restart the app to take effect.",
   "settings.browser.data.section": "Browser data",
   "settings.browser.desktopOnly": "Browser data can only be managed in the ZCode desktop app.",
-  "settings.browser.import.title": "Import Chrome sign-in state",
+  "settings.browser.import.title": "Import everything from Chrome",
   "settings.browser.import.description":
-    "Bring your Chrome sign-in state into the built-in browser once, so the AI can open sites you are already signed in to and work more smoothly.",
-  "settings.browser.import.action": "Import browser data",
+    "Pull cookies, saved passwords, history, bookmarks and site data from your Chrome into the built-in browser once — no relogin, ever. Passwords are decrypted locally on this machine and never leave it.",
+  "settings.browser.import.action": "Import everything from Chrome",
   "settings.browser.import.notFound":
     "No importable Chrome profile was found. Open Chrome and make sure the profile contains browsing data.",
   "settings.browser.import.ambiguous":
@@ -2553,7 +2553,8 @@ const enUS: Record<string, string> = {
     "The Chrome LocalStorage snapshot could not be read. Close Chrome and try again.",
   "settings.browser.import.failed": "Chrome browser data import failed.",
   "settings.browser.import.success":
-    "Imported {cookies} cookies and {entries} LocalStorage entries from {origins} sites.",
+    "Imported {cookies} cookies, {passwords} passwords and {entries} site entries from {origins} sites{historySuffix}.",
+  "settings.browser.import.historySuffix": ", plus history and bookmarks",
   "settings.browser.import.successWithSkipped":
     "Imported {cookies} cookies and {entries} LocalStorage entries from {origins} sites; {skipped} cookies were not imported.",
   "settings.browser.import.partialCookieProtected":

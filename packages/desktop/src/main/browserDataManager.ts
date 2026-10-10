@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { session as electronSession } from "electron";
 import type {
   ChromeBrowserDataImportError,
@@ -14,11 +15,13 @@ import {
   ChromeCookieAccessDeniedError,
   type MacChromeSafeStorageSecretReader,
 } from "./chromeCredentialManager.js";
+import { importChromeHistoryData } from "./chromeHistoryManager.js";
 import {
   emptyChromeLocalStorageImportStats,
   importChromeLocalStorage,
   type ChromeLocalStorageImportStats,
 } from "./chromeLocalStorageManager.js";
+import { importChromePasswords } from "./chromePasswordManager.js";
 import {
   discoverChromeProfile,
   resolveChromeExecutablePath,
@@ -66,6 +69,7 @@ function emptyImportResult(error?: ChromeBrowserDataImportError): ChromeBrowserD
     success: false,
     cookies: { imported: 0, skipped: 0, failed: 0 },
     localStorage: emptyChromeLocalStorageImportStats(),
+    passwords: { imported: 0, skipped: 0, failed: 0 },
     ...(error ? { error } : {}),
   };
 }
@@ -83,6 +87,8 @@ export async function importChromeBrowserData(options: {
   profilePath?: string;
   platform?: NodeJS.Platform;
   targetSession?: BrowserSessionLike;
+  /** Electron partition 对应的磁盘 profile 目录（History/Bookmarks 文件落点）；缺省跳过文件阶段。 */
+  targetProfileDir?: string;
   windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
   localStorageImporter?: (options: {
     profilePath: string;
@@ -125,6 +131,7 @@ export async function importChromeBrowserData(options: {
     success: false,
     cookies: { imported: 0, skipped: 0, failed: 0 },
     localStorage: emptyChromeLocalStorageImportStats(),
+    passwords: { imported: 0, skipped: 0, failed: 0 },
   };
   const issues = new Set<ChromeBrowserDataImportError>();
 
@@ -160,10 +167,44 @@ export async function importChromeBrowserData(options: {
     });
     if (result.localStorage.error) issues.add(result.localStorage.error);
 
+    // 密码：Login Data 经 DPAPI 解后写入目标会话。Electron 当前无 stable 的
+  // passwords.add 原语——目标 session 若不支持写入则记 skipped（issues 可见，
+    // 不静默吞）；解密材料不出 main，见 chromePasswordManager。
+    options.logger.info("[browser-data] 开始导入 Chrome 密码");
+    result.passwords = await importChromePasswords({
+      logger: options.logger,
+      platform,
+      profilePath,
+      targetSession: targetSession as Electron.Session & {
+        addPasswordRecord?: (record: {
+          originUrl: string;
+          signonRealm: string;
+          username: string;
+          password: string;
+        }) => Promise<void>;
+      },
+      userDataDir: dirname(profilePath),
+    });
+
+    // History/Bookmarks/Preferences：文件级快照复制（Electron 与 Chromium 同形态，
+    // 复制即导入；Login Data 不走这里）。targetProfileDir 由调用方经 options 传入，
+    // 缺省时跳过文件阶段（单测/无盘路径不炸）。
+    if (options.targetProfileDir) {
+      options.logger.info("[browser-data] 开始导入 Chrome History/Bookmarks");
+      result.history = await importChromeHistoryData({
+        logger: options.logger,
+        profilePath,
+        targetProfileDir: options.targetProfileDir,
+      });
+      if (result.history.error) issues.add(result.history.error);
+    }
+
     result.success =
       (cookieImport.databaseFound && cookieImport.rowCount === 0) ||
       result.cookies.imported > 0 ||
-      result.localStorage.originsImported > 0;
+      result.localStorage.originsImported > 0 ||
+      result.passwords.imported > 0 ||
+      (result.history?.visitsCopied === true || result.history?.bookmarksCopied === true);
     if (!result.success) {
       result.error = [
         "chrome_cookie_elevation_required",
@@ -185,6 +226,9 @@ export async function importChromeBrowserData(options: {
       importedLocalStorageEntries: result.localStorage.entriesImported,
       skippedLocalStorageOrigins: result.localStorage.originsSkipped,
       failedLocalStorageOrigins: result.localStorage.originsFailed,
+      importedPasswords: result.passwords.imported,
+      historyCopied: result.history?.visitsCopied ?? false,
+      bookmarksCopied: result.history?.bookmarksCopied ?? false,
     });
     return result;
   } catch (error) {

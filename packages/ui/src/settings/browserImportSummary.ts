@@ -33,11 +33,17 @@ export function formatImportSummary(
                             : "settings.browser.import.failed";
     return formatMessage({ id: errorMessageId });
   }
+  const historySuffix =
+    result.history?.visitsCopied === true || result.history?.bookmarksCopied === true
+      ? formatMessage({ id: "settings.browser.import.historySuffix" })
+      : "";
   const values = {
     cookies: String(result.cookies.imported),
+    passwords: String(result.passwords.imported),
     origins: String(result.localStorage.originsImported),
     entries: String(result.localStorage.entriesImported),
     skipped: String(result.cookies.skipped),
+    historySuffix,
   };
   if (
     result.issues?.some((issue) =>

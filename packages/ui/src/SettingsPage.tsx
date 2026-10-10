@@ -1950,7 +1950,6 @@ export function SettingsPage({
                         ) : activeSection === "browser" ? (
                           <BrowserSettingsSection
                             isDesktop={Boolean(isDesktop)}
-                            isWindowsDesktop={isWindowsDesktop}
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
                             embeddedBrowserAllowInsecureCertificates={

@@ -365,7 +365,7 @@ export interface ChromeBrowserDataImportOptions {
   allowElevatedChromeDecryption?: boolean;
 }
 
-/** Chrome 浏览器数据导入只返回数量和状态；Cookie/LocalStorage 值和解密材料不得跨进程。 */
+/** Chrome 浏览器数据导入只返回数量和状态；Cookie/密码值和解密材料不得跨进程。 */
 export interface ChromeBrowserDataImportResult {
   success: boolean;
   cookies: {
@@ -378,6 +378,18 @@ export interface ChromeBrowserDataImportResult {
     entriesImported: number;
     originsSkipped: number;
     originsFailed: number;
+    error?: ChromeBrowserDataImportError;
+  };
+  passwords: {
+    imported: number;
+    skipped: number;
+    failed: number;
+    error?: ChromeBrowserDataImportError;
+  };
+  history?: {
+    visitsCopied: boolean;
+    bookmarksCopied: boolean;
+    preferencesCopied: boolean;
     error?: ChromeBrowserDataImportError;
   };
   /** 部分成功时保留可操作问题；不得包含 Profile 绝对路径或站点数据。 */

@@ -2369,10 +2369,10 @@ const zhCN: Record<string, string> = {
     "证书校验设置已保存，重启应用后生效",
   "settings.browser.data.section": "浏览器数据",
   "settings.browser.desktopOnly": "浏览器数据只能在 ZCode 桌面端管理。",
-  "settings.browser.import.title": "导入 Chrome 登录状态",
+  "settings.browser.import.title": "从 Chrome 一键搬家",
   "settings.browser.import.description":
-    "一次性把 Chrome 登录状态带到内置浏览器，AI 就能直接打开你已经登录的网站，操作更流畅。",
-  "settings.browser.import.action": "导入浏览器数据",
+    "把 Chrome 的 Cookie、保存的密码、历史、书签和站点数据一次性搬进内置浏览器——以后再也不用重新登录。密码只在本机解密，不会离开这台电脑。",
+  "settings.browser.import.action": "从 Chrome 导入全部数据",
   "settings.browser.import.notFound":
     "未找到可导入的 Chrome Profile。请先打开 Chrome 并确认已有浏览数据。",
   "settings.browser.import.ambiguous":
@@ -2389,8 +2389,8 @@ const zhCN: Record<string, string> = {
     "Windows 未能解开 Chrome 的 App-Bound Cookie，Cookie 未导入。",
   "settings.browser.import.adminConfirmTitle": "允许管理员权限导入 Chrome Cookie？",
   "settings.browser.import.adminConfirmDescription":
-    "Chrome 在 Windows 上使用 App-Bound 加密保护 Cookie。ZCode 将为本次导入请求管理员权限，临时启动系统服务，完成后立即删除。不会读取或导入 Chrome 密码。",
-  "settings.browser.import.adminConsent": "我确认只为本次 Cookie 导入授予管理员权限",
+    "Chrome 在 Windows 上使用 App-Bound 加密保护 Cookie 和密码。ZCode 将为本次导入请求管理员权限，临时启动系统服务，完成后立即删除。密码只在本机解密，不会上传或离开这台电脑。",
+  "settings.browser.import.adminConsent": "我确认只为本次导入授予管理员权限",
   "settings.browser.import.adminConfirmAction": "继续并请求授权",
   "settings.browser.import.cookieProtected":
     "Chrome Cookie 受系统的应用绑定保护，当前无法安全导入。LocalStorage 中没有可导入的数据。",
@@ -2400,7 +2400,8 @@ const zhCN: Record<string, string> = {
     "Chrome LocalStorage 快照读取失败。请关闭 Chrome 后重试。",
   "settings.browser.import.failed": "Chrome 浏览器数据导入失败。",
   "settings.browser.import.success":
-    "已导入 {cookies} 个 Cookie，以及 {origins} 个站点的 {entries} 条 LocalStorage 数据。",
+    "已导入 {cookies} 个 Cookie、{passwords} 个密码，以及 {origins} 个站点的 {entries} 条站点数据{historySuffix}。",
+  "settings.browser.import.historySuffix": "，含历史与书签",
   "settings.browser.import.successWithSkipped":
     "已导入 {cookies} 个 Cookie，以及 {origins} 个站点的 {entries} 条 LocalStorage 数据；另有 {skipped} 个 Cookie 未导入。",
   "settings.browser.import.partialCookieProtected":

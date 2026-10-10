@@ -28,6 +28,11 @@ import { registerHostServiceResourceTelemetry } from "./hostServiceResourceTelem
 import { resolveResourceTelemetryEnvironmentKey } from "./hostResourceTelemetryEnvironment.js";
 import { reportHostSessionCreate } from "./hostSessionCreateTelemetry.js";
 import { createBrowserControlMainBridge } from "./browserControlMainBridge.js";
+import {
+  RealChromeExtensionBackend,
+  RealChromeRelayClient,
+  startRealChromeRelayServer,
+} from "./realChromeRelayBackend.js";
 import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactMaterializer.js";
 import {
   ServiceCollection,
@@ -228,9 +233,21 @@ function authorizeLocalMediaPreviewPath(path: string): Promise<string> {
   });
 }
 
-// browser-use host↔main 桥：把 agent 的 browser 命令经 parentPort 转给 main（WebContentsView+CDP）。
-// parentPort 为空（不应发生于 host 进程）时 postToMain 抛错，bridge 自身返回 backend_unavailable。
+// 真实 Chrome（extension 后端）：relay client + 本地 ws 服务常开，extension
+// 未连时 list() 只报 iab（descriptor() 返回 null，不伪造）。用户在设置里看到
+// “Real Chrome 未连接”前，agent 侧无任何行为变化——这是默认关的安全形态。
+const realChromeRelay = new RealChromeRelayClient({ port: 9224 });
+const realChromeBackend = new RealChromeExtensionBackend({ relay: realChromeRelay });
+try {
+  startRealChromeRelayServer({ client: realChromeRelay, port: 9224 });
+} catch {
+  // 9224 被占（用户跑着 omp relay daemon）时不炸 host：iab 照常，
+  // extension 后端等用户关掉占用或改端口后再连。桌面单测用 injectHello 覆盖。
+}
+ // browser-use host↔main 桥：把 agent 的 browser 命令经 parentPort 转给 main（WebContentsView+CDP）。
+ // parentPort 为空（不应发生于 host 进程）时 postToMain 抛错，bridge 自身返回 backend_unavailable。
 const browserControlMainBridge = createBrowserControlMainBridge({
+  realChromeBackend,
   postToMain: (message) => {
     if (!parentPort) {
       throw new Error("parentPort unavailable");

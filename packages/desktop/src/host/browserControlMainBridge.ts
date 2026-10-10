@@ -7,6 +7,7 @@ import type {
   BrowserCommandResult,
   BrowserRecordingArtifact,
 } from "@zcode/shared";
+import type { RealChromeExtensionBackend } from "./realChromeRelayBackend.js";
 
 /**
  * host↔main browser 执行桥。host 侧把一条命令经 parentPort 发给 main（WebContentsView+CDP 执行），
@@ -124,6 +125,8 @@ export function createBrowserControlMainBridge(deps: {
     workspaceIdentity?: string;
     remoteSessionId?: string;
   }): Promise<BrowserRecordingArtifact>;
+  /** 真实 Chrome 后端（可选）：有则 list() 多报一个 extension descriptor，execute 按 id 路由。 */
+  realChromeBackend?: Pick<RealChromeExtensionBackend, "browserId" | "generation" | "descriptor" | "execute">;
 }): BrowserControlMainBridge {
   const pending = new Map<string, PendingEntry>();
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -168,7 +171,11 @@ export function createBrowserControlMainBridge(deps: {
 
   return {
     async list(): Promise<BrowserBackendDescriptor[]> {
-      return [descriptor];
+      const backends: BrowserBackendDescriptor[] = [descriptor];
+      // 未握手（extension 未连）时 descriptor() 返回 null，不伪造 stub。
+      const realChrome = deps.realChromeBackend?.descriptor() ?? null;
+      if (realChrome) backends.push(realChrome);
+      return backends;
     },
 
     async execute({
@@ -185,6 +192,29 @@ export function createBrowserControlMainBridge(deps: {
       sessionContext = "live",
       command,
     }): Promise<BrowserCommandResult> {
+      // extension 后端：id 命中即转交 relay，不经 main 的 WebContentsView。
+      const realChrome = deps.realChromeBackend;
+      if (
+        realChrome &&
+        requestedBrowserId &&
+        (requestedBrowserId === realChrome.browserId ||
+          requestedBrowserId.startsWith("extension:"))
+      ) {
+        if (
+          requestedBrowserGeneration !== undefined &&
+          requestedBrowserGeneration !== realChrome.generation
+        ) {
+          return {
+            ok: false,
+            error: {
+              code: "backend_unavailable",
+              message: `browser backend '${realChrome.browserId}' generation ${requestedBrowserGeneration} is stale`,
+            },
+            elapsedMs: 0,
+          };
+        }
+        return await realChrome.execute(command);
+      }
       if (requestedBrowserId && requestedBrowserId !== browserId) {
         return {
           ok: false,
