@@ -71,9 +71,25 @@ test("connected relay advertises extension with tabCount", async () => {
 });
 
 test("extension execute routes to relay, never to main", async () => {
-  const { relay, sent } = connectedRelay([
-    { tabId: 101, url: "https://example.com", title: "Example", active: true },
-  ]);
+  const relay = new RealChromeRelayClient();
+  relay.attachSocket({
+    readyState: 1,
+    send: (data: string) => {
+      // snapshot 经 attach+send 两次 rpc；发出即回成功，不猜时长。
+      const msg = JSON.parse(data) as { id: string; op: string };
+      queueMicrotask(() =>
+        relay.injectRpcResult({ t: "rpcResult", id: msg.id, ok: true, result: {} }),
+      );
+    },
+    close: () => {},
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+  });
+  relay.injectHello(
+    helloWith([{ tabId: 101, url: "https://example.com", title: "Example", active: true }]),
+  );
   const backend = new RealChromeExtensionBackend({ relay });
   let mainCalls = 0;
   const bridge = createBrowserControlMainBridge({
@@ -82,25 +98,14 @@ test("extension execute routes to relay, never to main", async () => {
     },
     realChromeBackend: backend,
   });
-  const pending = bridge.execute({
+  const result = await bridge.execute({
     browserId: backend.browserId,
     browserGeneration: backend.generation,
     sessionId: "sess-test",
-    command: { method: "listUserTabs" },
+    command: { method: "snapshot", tabId: "ext-tab-101" },
   });
-  // 等 relay 侧真正收到 rpc（send 被调）再断言路由——不等猜测时长。
-  const { promise, resolve } = Promise.withResolvers<void>();
-  const probe = setInterval(() => {
-    if (sent.length > 0) {
-      clearInterval(probe);
-      resolve();
-    }
-  }, 5);
-  await promise;
   assert.equal(mainCalls, 0);
-  relay.dispose();
-  const result = await pending;
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, true);
 });
 
 
