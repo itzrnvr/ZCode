@@ -23,6 +23,7 @@ import { invalidateDeferredDraftSessionForSkillChange } from "@/lib/zcodeDraftSk
 import { logger } from "@/logger.js";
 import { startUserAction } from "@/lib/userActionTelemetry.js";
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
+import { ChromeImportDialog, type ImportScopeState } from "@/settings/ChromeImportDialog.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { useSkillStore } from "@/store/skillStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
@@ -97,14 +98,11 @@ export function BrowserSettingsSection({
   const skillStoreWorkspaceIdentity = useSkillStore((state) => state.workspaceIdentity);
   const [pendingOperation, setPendingOperation] = useState<BrowserDataOperation>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importLiveScopes, setImportLiveScopes] = useState<ImportScopeState[] | null>(null);
   const [lastImportResult, setLastImportResult] = useState<ChromeBrowserDataImportResult | null>(
     null,
   );
-  const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
-  const nativeActionsAvailable =
-    isDesktop &&
-    typeof platform.importChromeBrowserData === "function" &&
-    typeof platform.clearEmbeddedBrowserData === "function";
 
   useEffect(() => {
     if (!workspacePath) return;
@@ -173,31 +171,44 @@ export function BrowserSettingsSection({
     [intl, pluginManagementService, refreshAfterPluginChange, setPluginEnabled],
   );
 
-  const handleImport = useCallback(async () => {
-    if (!platform.importChromeBrowserData) return;
-    setPendingOperation("import");
-    const trace = startUserAction({
-      featureId: "settings.browser",
-      action: "import_browser_data",
-      trigger: "button",
-    });
-    try {
-      const result = await platform.importChromeBrowserData();
-      trace.complete({ resultSource: "platform_result" });
-      setLastImportResult(result);
-      toast(formatImportSummary(result, intl.formatMessage), {
-        durationMs: 5000,
+  const handleImportConfirm = useCallback(
+    async (allowElevated: boolean) => {
+      if (!platform.importChromeBrowserData) return;
+      setPendingOperation("import");
+      setLastImportResult(null);
+      setImportLiveScopes([
+        { id: "cookies", status: "running" },
+        { id: "passwords", status: "pending" },
+        { id: "history", status: "pending" },
+        { id: "siteData", status: "pending" },
+      ]);
+      const trace = startUserAction({
+        featureId: "settings.browser",
+        action: "import_browser_data",
+        trigger: "button",
       });
-    } catch (error) {
-      trace.fail({ failureStage: "browser_data_import" });
-      logger.error("[browser-settings] 导入 Chrome 数据失败", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      toast(intl.formatMessage({ id: "settings.browser.import.failed" }));
-    } finally {
-      setPendingOperation(null);
-    }
-  }, [intl, platform]);
+      try {
+        const result = await platform.importChromeBrowserData({
+          allowElevatedChromeDecryption: allowElevated,
+        });
+        trace.complete({ resultSource: "platform_result" });
+        setLastImportResult(result);
+        setImportLiveScopes(null);
+        toast(formatImportSummary(result, intl.formatMessage), {
+          durationMs: 5000,
+        });
+      } catch (error) {
+        trace.fail({ failureStage: "browser_data_import" });
+        logger.error("[browser-settings] 导入 Chrome 数据失败", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        toast(intl.formatMessage({ id: "settings.browser.import.failed" }));
+      } finally {
+        setPendingOperation(null);
+      }
+    },
+    [intl, platform],
+  );
 
   const handleClear = useCallback(
     async (mode: "cache" | "all") => {
@@ -276,7 +287,7 @@ export function BrowserSettingsSection({
                 operation="import"
                 pendingOperation={pendingOperation}
                 disabled={operationDisabled}
-                onClick={() => void handleImport()}
+                onClick={() => setImportDialogOpen(true)}
               >
                 {intl.formatMessage({ id: "settings.browser.import.action" })}
               </BrowserOperationButton>
@@ -410,6 +421,18 @@ export function BrowserSettingsSection({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ChromeImportDialog
+        open={importDialogOpen}
+        running={pendingOperation === "import"}
+        result={lastImportResult}
+        liveScopes={importLiveScopes}
+        onOpenChange={(open) => {
+          if (pendingOperation === "import") return;
+          setImportDialogOpen(open);
+          if (!open) setImportLiveScopes(null);
+        }}
+        onConfirm={(allowElevated) => void handleImportConfirm(allowElevated)}
+      />
     </div>
   );
 }

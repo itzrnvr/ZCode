@@ -2373,6 +2373,18 @@ const zhCN: Record<string, string> = {
   "settings.browser.import.description":
     "把 Chrome 的 Cookie、保存的密码、历史、书签和站点数据一次性搬进内置浏览器——以后再也不用重新登录。密码只在本机解密，不会离开这台电脑。",
   "settings.browser.import.action": "从 Chrome 导入全部数据",
+  "settings.browser.import.dialogTitle": "从 Chrome 导入全部数据？",
+  "settings.browser.import.dialogDescription":
+    "把你 Chrome 账号的登录状态复制到内置浏览器。密码只在本机解密，绝不上传。",
+  "settings.browser.import.dialogConfirm": "开始导入",
+  "settings.browser.import.scope.cookies": "Cookie",
+  "settings.browser.import.scope.cookies.hint": "所有网站保持登录",
+  "settings.browser.import.scope.passwords": "保存的密码",
+  "settings.browser.import.scope.passwords.hint": "只在本机解密，不离开这台电脑",
+  "settings.browser.import.scope.history": "历史与书签",
+  "settings.browser.import.scope.history.hint": "访问记录、书签和偏好",
+  "settings.browser.import.scope.siteData": "站点数据",
+  "settings.browser.import.scope.siteData.hint": "LocalStorage 与站点存储",
   "settings.browser.import.notFound":
     "未找到可导入的 Chrome Profile。请先打开 Chrome 并确认已有浏览数据。",
   "settings.browser.import.ambiguous":

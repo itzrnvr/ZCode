@@ -2522,6 +2522,18 @@ const enUS: Record<string, string> = {
   "settings.browser.import.description":
     "Pull cookies, saved passwords, history, bookmarks and site data from your Chrome into the built-in browser once — no relogin, ever. Passwords are decrypted locally on this machine and never leave it.",
   "settings.browser.import.action": "Import everything from Chrome",
+  "settings.browser.import.dialogTitle": "Import everything from Chrome?",
+  "settings.browser.import.dialogDescription":
+    "Blackbird copies sign-in state from your Chrome profile into its built-in browser. Passwords are decrypted on this machine only and never uploaded.",
+  "settings.browser.import.dialogConfirm": "Start import",
+  "settings.browser.import.scope.cookies": "Cookies",
+  "settings.browser.import.scope.cookies.hint": "Stay signed in everywhere",
+  "settings.browser.import.scope.passwords": "Saved passwords",
+  "settings.browser.import.scope.passwords.hint": "Decrypted locally, never leaves this PC",
+  "settings.browser.import.scope.history": "History & bookmarks",
+  "settings.browser.import.scope.history.hint": "Visits, bookmarks and preferences",
+  "settings.browser.import.scope.siteData": "Site data",
+  "settings.browser.import.scope.siteData.hint": "LocalStorage and site storage",
   "settings.browser.import.notFound":
     "No importable Chrome profile was found. Open Chrome and make sure the profile contains browsing data.",
   "settings.browser.import.ambiguous":
