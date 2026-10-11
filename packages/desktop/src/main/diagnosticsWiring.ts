@@ -1,8 +1,8 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow } from "electron";
 import { startDiagnosticsServer, type DiagnosticsServer } from "./diagnosticsServer.js";
-import { getZCodeCliLogDir } from "./exportLogs.js";
 
 interface DiagnosticsWiringLogger {
   info: (...args: unknown[]) => void;
@@ -92,7 +92,9 @@ async function collectAppState(): Promise<Record<string, unknown>> {
 
 async function collectRecentLogs(lines: number): Promise<string[]> {
   try {
-    const logDir = getZCodeCliLogDir();
+    // 与 exportLogs.ts:getZCodeCliLogDir 同路径（~/.zcode/cli/log）；那是模块私有的，
+    // 这里只读最近一个 jsonl，不碰归档逻辑。
+    const logDir = join(homedir(), ".zcode", "cli", "log");
     const files = (await readdir(logDir)).filter((name) => name.endsWith(".jsonl")).sort();
     const latest = files.at(-1);
     if (!latest) return [];
