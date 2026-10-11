@@ -98,6 +98,7 @@ export const SETTINGS_USER_ACTION_FEATURES = {
     "clear_cache",
     "clear_all_data",
   ],
+  "settings.diagnostics": ["toggle_evaluate"],
 } as const;
 
 export type CoreUserActionFeatureId = keyof typeof CORE_USER_ACTION_FEATURES;

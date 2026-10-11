@@ -100,6 +100,10 @@ export function BrowserSettingsSection({
   const refreshSkills = useSkillStore((state) => state.refresh);
   const skillStoreWorkspacePath = useSkillStore((state) => state.workspacePath);
   const skillStoreWorkspaceIdentity = useSkillStore((state) => state.workspaceIdentity);
+  const [pendingOperation, setPendingOperation] = useState<BrowserDataOperation>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importLiveScopes, setImportLiveScopes] = useState<ImportScopeState[] | null>(null);
   const [lastImportResult, setLastImportResult] = useState<ChromeBrowserDataImportResult | null>(
     null,
   );
@@ -109,6 +113,11 @@ export function BrowserSettingsSection({
     history: true,
     siteData: true,
   });
+  const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
+  const nativeActionsAvailable =
+    isDesktop &&
+    typeof platform.importChromeBrowserData === "function" &&
+    typeof platform.clearEmbeddedBrowserData === "function";
   useEffect(() => {
     if (!workspacePath) return;
     void initializePlugins({
