@@ -108,6 +108,10 @@ export function BrowserSettingsSection({
     null,
   );
   const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
+  const nativeActionsAvailable =
+    isDesktop &&
+    typeof platform.importChromeBrowserData === "function" &&
+    typeof platform.clearEmbeddedBrowserData === "function";
   useEffect(() => {
     if (!workspacePath) return;
     void initializePlugins({
