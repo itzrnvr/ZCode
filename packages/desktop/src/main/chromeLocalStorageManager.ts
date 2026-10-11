@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Chrome helper、CDP 传输和 Electron 目标写入必须共享同一套敏感数据边界。 */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep as pathSeparator } from "node:path";
 import { BrowserWindow } from "electron";
@@ -125,6 +125,37 @@ function pathExists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+/**
+ * Chrome 开着时 LevelDB 文件被独占锁：整目录 cp 直接 EBUSY 炸掉整个
+ * LocalStorage 阶段。逐文件复制，锁住的跳过（该 origin 本次记 failed，
+ * 不连累其他 origin）。调用方重试整阶段时被锁文件可能已释放。
+ */
+async function copyLevelDbTolerant(options: {
+  logger: BrowserDataLogger;
+  sourceDir: string;
+  targetDir: string;
+}): Promise<{ copied: number; skipped: string[] }> {
+  await mkdir(options.targetDir, { recursive: true });
+  const entries = await readdir(options.sourceDir, { withFileTypes: true });
+  let copied = 0;
+  const skipped: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    try {
+      await copyFile(join(options.sourceDir, entry.name), join(options.targetDir, entry.name));
+      copied += 1;
+    } catch {
+      skipped.push(entry.name);
+    }
+  }
+  if (skipped.length > 0) {
+    options.logger.warn("[browser-data] Chrome LocalStorage 部分文件被锁定，已跳过", {
+      skippedCount: skipped.length,
+    });
+  }
+  return { copied, skipped };
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -649,11 +680,12 @@ export async function importChromeLocalStorage(options: {
   let originCount = 0;
   try {
     await mkdir(targetProfilePath, { recursive: true });
-    // Windows 上 Chrome 可能持续写入 LevelDB。必须先复制快照，再扫描 metadata；
-    // 直接扫描源目录会把锁冲突和写入竞态误报为“没有 LocalStorage”。
-    await cp(sourceLocalStoragePath, join(targetProfilePath, "Local Storage"), {
-      recursive: true,
-      force: true,
+    // Windows 上 Chrome 可能持续写入 LevelDB。必须先复制快照，再扫描 metadata。
+    // 整目录 cp 会被锁文件炸掉（EBUSY → 整个阶段失败）：逐文件复制，锁住的跳过。
+    await copyLevelDbTolerant({
+      logger: options.logger,
+      sourceDir: join(sourceLocalStoragePath, "leveldb"),
+      targetDir: join(targetProfilePath, "Local Storage", "leveldb"),
     });
     const origins = await discoverChromeLocalStorageOrigins(
       join(targetProfilePath, "Local Storage"),

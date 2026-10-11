@@ -198,17 +198,27 @@ export async function importChromePasswords(options: {
   };
   userDataDir: string;
 }): Promise<ChromePasswordImportStats> {
-  const { records, skipped, failed } = await readChromePasswords({
-    logger: options.logger,
-    platform: options.platform,
-    profilePath: options.profilePath,
-    userDataDir: options.userDataDir,
-  });
-  if (records.length === 0) return { imported: 0, skipped, failed };
-  const written = await writeChromePasswordsToSession({
-    logger: options.logger,
-    records,
-    targetSession: options.targetSession,
-  });
-  return { imported: written.imported, skipped: skipped + written.skipped, failed: failed + written.failed };
+  // 密码阶段绝不能掀翻整个导入：DPAPI 失败、库被锁、master key 缺失——
+  // 一律记 failed/skipped 返回。调用方（browserDataManager）不 try/catch 这里。
+  try {
+    const { records, skipped, failed } = await readChromePasswords({
+      logger: options.logger,
+      platform: options.platform,
+      profilePath: options.profilePath,
+      userDataDir: options.userDataDir,
+    });
+    if (records.length === 0) return { imported: 0, skipped, failed };
+    const written = await writeChromePasswordsToSession({
+      logger: options.logger,
+      records,
+      targetSession: options.targetSession,
+    });
+    return { imported: written.imported, skipped: skipped + written.skipped, failed: failed + written.failed };
+  } catch (error) {
+    options.logger.warn(
+      "[browser-data] Chrome 密码阶段失败，已降级为跳过",
+      error instanceof Error ? { name: error.name } : {},
+    );
+    return { imported: 0, skipped: 0, failed: 1 };
+  }
 }
