@@ -89,6 +89,8 @@ export async function importChromeBrowserData(options: {
   targetSession?: BrowserSessionLike;
   /** Electron partition 对应的磁盘 profile 目录（History/Bookmarks 文件落点）；缺省跳过文件阶段。 */
   targetProfileDir?: string;
+  /** 对话框勾选的作用域；缺省全量。未勾选的阶段跳过（记 skipped，不报错）。 */
+  scopes?: Record<string, boolean>;
   windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
   localStorageImporter?: (options: {
     profilePath: string;
@@ -136,60 +138,63 @@ export async function importChromeBrowserData(options: {
   const issues = new Set<ChromeBrowserDataImportError>();
 
   try {
+    const want = (scope: string): boolean => options.scopes?.[scope] !== false;
     options.logger.info("[browser-data] 开始导入 Chrome 浏览器数据", {
       browser: discovered?.source.browser ?? "explicit-profile",
       profile: discovered?.source.profileDirectory ?? "explicit-profile",
     });
-    const cookieImport = await importChromeCookies({
-      allowElevatedChromeDecryption: options.allowElevatedChromeDecryption,
-      databaseBackup: options.chromeCookieDatabaseBackup,
-      chromeCookieHelper: options.chromeCookieHelper,
-      chromeExecutablePath,
-      chromePasswordStore,
-      logger: options.logger,
-      macChromeSafeStorageSecretReader: options.macChromeSafeStorageSecretReader,
-      platform,
-      profilePath,
-      targetSession,
-      windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
-    });
+    const cookieImport = want("cookies")
+      ? await importChromeCookies({
+          allowElevatedChromeDecryption: options.allowElevatedChromeDecryption,
+          databaseBackup: options.chromeCookieDatabaseBackup,
+          chromeCookieHelper: options.chromeCookieHelper,
+          chromeExecutablePath,
+          chromePasswordStore,
+          logger: options.logger,
+          macChromeSafeStorageSecretReader: options.macChromeSafeStorageSecretReader,
+          platform,
+          profilePath,
+          targetSession,
+          windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
+        })
+      : { stats: { imported: 0, skipped: 0, failed: 0 }, issues: [], databaseFound: false, rowCount: 0 };
     result.cookies = cookieImport.stats;
     for (const issue of cookieImport.issues) issues.add(issue);
 
     const localStorageImporter = options.localStorageImporter ?? importChromeLocalStorage;
-    options.logger.info("[browser-data] 开始导入 Chrome LocalStorage");
-    result.localStorage = await localStorageImporter({
-      profilePath,
-      targetSession: targetSession as Electron.Session,
-      logger: options.logger,
-      platform,
-      chromeExecutablePath,
-    });
-    if (result.localStorage.error) issues.add(result.localStorage.error);
+    if (want("siteData")) {
+      options.logger.info("[browser-data] 开始导入 Chrome LocalStorage");
+      result.localStorage = await localStorageImporter({
+        profilePath,
+        targetSession: targetSession as Electron.Session,
+        logger: options.logger,
+        platform,
+        chromeExecutablePath,
+      });
+      if (result.localStorage.error) issues.add(result.localStorage.error);
+    }
 
-    // 密码：Login Data 经 DPAPI 解后写入目标会话。Electron 当前无 stable 的
-  // passwords.add 原语——目标 session 若不支持写入则记 skipped（issues 可见，
-    // 不静默吞）；解密材料不出 main，见 chromePasswordManager。
-    options.logger.info("[browser-data] 开始导入 Chrome 密码");
-    result.passwords = await importChromePasswords({
-      logger: options.logger,
-      platform,
-      profilePath,
-      targetSession: targetSession as Electron.Session & {
-        addPasswordRecord?: (record: {
-          originUrl: string;
-          signonRealm: string;
-          username: string;
-          password: string;
-        }) => Promise<void>;
-      },
-      userDataDir: dirname(profilePath),
-    });
+    // 密码：Login Data 经 DPAPI 解后写入目标会话。未勾选则跳过（skipped 可见，不静默吞）。
+    if (want("passwords")) {
+      options.logger.info("[browser-data] 开始导入 Chrome 密码");
+      result.passwords = await importChromePasswords({
+        logger: options.logger,
+        platform,
+        profilePath,
+        targetSession: targetSession as Electron.Session & {
+          addPasswordRecord?: (record: {
+            originUrl: string;
+            signonRealm: string;
+            username: string;
+            password: string;
+          }) => Promise<void>;
+        },
+        userDataDir: dirname(profilePath),
+      });
+    }
 
-    // History/Bookmarks/Preferences：文件级快照复制（Electron 与 Chromium 同形态，
-    // 复制即导入；Login Data 不走这里）。targetProfileDir 由调用方经 options 传入，
-    // 缺省时跳过文件阶段（单测/无盘路径不炸）。
-    if (options.targetProfileDir) {
+    // History/Bookmarks/Preferences：文件级快照复制。未勾选或无 targetProfileDir 则跳过。
+    if (want("history") && options.targetProfileDir) {
       options.logger.info("[browser-data] 开始导入 Chrome History/Bookmarks");
       result.history = await importChromeHistoryData({
         logger: options.logger,

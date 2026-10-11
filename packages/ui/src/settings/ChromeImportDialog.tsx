@@ -103,6 +103,8 @@ export function ChromeImportDialog({
   running,
   result,
   liveScopes,
+  enabledScopes,
+  onToggleScope,
   onOpenChange,
   onConfirm,
 }: {
@@ -110,14 +112,16 @@ export function ChromeImportDialog({
   running: boolean;
   result: ChromeBrowserDataImportResult | null;
   liveScopes: ImportScopeState[] | null;
+  enabledScopes: Record<ImportScopeId, boolean>;
+  onToggleScope: (scope: ImportScopeId) => void;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (allowElevated: boolean) => void;
+  onConfirm: (allowElevated: boolean, scopes: Record<ImportScopeId, boolean>) => void;
 }) {
   const { intl } = useZCodeIntl();
   const [allowElevated, setAllowElevated] = useState(true);
   const scopes = liveScopes ?? scopeStateFor(result);
   const done = result !== null && !running;
-
+  const selectable = !running && !done;
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -130,29 +134,56 @@ export function ChromeImportDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="space-y-2 py-2" role="list" aria-label="import scopes">
-          {scopes.map((scope) => (
-            <div
-              key={scope.id}
-              role="listitem"
-              data-import-scope={scope.id}
-              data-import-status={scope.status}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border border-border px-3 py-2",
-                scope.status === "running" && "border-primary",
-              )}
-            >
-              <ScopeIcon status={scope.status} />
-              <div className="min-w-0 flex-1">
-                <div className="text-ui-base font-medium">
-                  {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}` })}
+          {scopes.map((scope) =>
+            selectable ? (
+              <label
+                key={scope.id}
+                data-import-scope={scope.id}
+                data-import-status={scope.status}
+                data-import-enabled={enabledScopes[scope.id] ? "true" : "false"}
+                className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2"
+              >
+                <input
+                  type="checkbox"
+                  checked={enabledScopes[scope.id]}
+                  onChange={() => onToggleScope(scope.id)}
+                  aria-label={intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}` })}
+                  className="size-4 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-ui-base font-medium">
+                    {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}` })}
+                  </div>
+                  <div className="truncate text-ui-sm text-foreground-subtle">
+                    {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}.hint` })}
+                    {scope.detail ? ` · ${scope.detail}` : ""}
+                  </div>
                 </div>
-                <div className="truncate text-ui-sm text-foreground-subtle">
-                  {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}.hint` })}
-                  {scope.detail ? ` · ${scope.detail}` : ""}
+              </label>
+            ) : (
+              <div
+                key={scope.id}
+                role="listitem"
+                data-import-scope={scope.id}
+                data-import-status={scope.status}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg border border-border px-3 py-2",
+                  scope.status === "running" && "border-primary",
+                )}
+              >
+                <ScopeIcon status={scope.status} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-ui-base font-medium">
+                    {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}` })}
+                  </div>
+                  <div className="truncate text-ui-sm text-foreground-subtle">
+                    {intl.formatMessage({ id: `settings.browser.import.scope.${scope.id}.hint` })}
+                    {scope.detail ? ` · ${scope.detail}` : ""}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ),
+          )}
         </div>
         {!done ? (
           <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 text-ui-sm">
@@ -175,7 +206,7 @@ export function ChromeImportDialog({
               disabled={running}
               onClick={(event) => {
                 event.preventDefault();
-                onConfirm(allowElevated);
+                onConfirm(allowElevated, enabledScopes);
               }}
             >
               {running ? (

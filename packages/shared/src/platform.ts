@@ -363,6 +363,8 @@ export type ChromeBrowserDataImportError =
 export interface ChromeBrowserDataImportOptions {
   /** Windows App-Bound Cookie 只能在本次显式确认后触发 UAC；不得持久化为全局授权。 */
   allowElevatedChromeDecryption?: boolean;
+  /** 对话框勾选的作用域；缺省全量。key: cookies/passwords/history/siteData。 */
+  scopes?: Record<string, boolean>;
 }
 
 /** Chrome 浏览器数据导入只返回数量和状态；Cookie/密码值和解密材料不得跨进程。 */

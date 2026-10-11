@@ -23,7 +23,7 @@ import { invalidateDeferredDraftSessionForSkillChange } from "@/lib/zcodeDraftSk
 import { logger } from "@/logger.js";
 import { startUserAction } from "@/lib/userActionTelemetry.js";
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
-import { ChromeImportDialog, type ImportScopeState } from "@/settings/ChromeImportDialog.js";
+import { ChromeImportDialog, type ImportScopeId, type ImportScopeState } from "@/settings/ChromeImportDialog.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { useSkillStore } from "@/store/skillStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
@@ -100,18 +100,15 @@ export function BrowserSettingsSection({
   const refreshSkills = useSkillStore((state) => state.refresh);
   const skillStoreWorkspacePath = useSkillStore((state) => state.workspacePath);
   const skillStoreWorkspaceIdentity = useSkillStore((state) => state.workspaceIdentity);
-  const [pendingOperation, setPendingOperation] = useState<BrowserDataOperation>(null);
-  const [confirmClearAll, setConfirmClearAll] = useState(false);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importLiveScopes, setImportLiveScopes] = useState<ImportScopeState[] | null>(null);
   const [lastImportResult, setLastImportResult] = useState<ChromeBrowserDataImportResult | null>(
     null,
   );
-  const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
-  const nativeActionsAvailable =
-    isDesktop &&
-    typeof platform.importChromeBrowserData === "function" &&
-    typeof platform.clearEmbeddedBrowserData === "function";
+  const [enabledScopes, setEnabledScopes] = useState<Record<ImportScopeId, boolean>>({
+    cookies: true,
+    passwords: true,
+    history: true,
+    siteData: true,
+  });
   useEffect(() => {
     if (!workspacePath) return;
     void initializePlugins({
@@ -180,7 +177,7 @@ export function BrowserSettingsSection({
   );
 
   const handleImportConfirm = useCallback(
-    async (allowElevated: boolean) => {
+    async (allowElevated: boolean, scopes: Record<ImportScopeId, boolean>) => {
       if (!platform.importChromeBrowserData) return;
       setPendingOperation("import");
       setLastImportResult(null);
@@ -198,6 +195,7 @@ export function BrowserSettingsSection({
       try {
         const result = await platform.importChromeBrowserData({
           allowElevatedChromeDecryption: allowElevated,
+          scopes,
         });
         trace.complete({ resultSource: "platform_result" });
         setLastImportResult(result);
@@ -451,12 +449,16 @@ export function BrowserSettingsSection({
         running={pendingOperation === "import"}
         result={lastImportResult}
         liveScopes={importLiveScopes}
+        enabledScopes={enabledScopes}
+        onToggleScope={(scope) =>
+          setEnabledScopes((current) => ({ ...current, [scope]: !current[scope] }))
+        }
         onOpenChange={(open) => {
           if (pendingOperation === "import") return;
           setImportDialogOpen(open);
           if (!open) setImportLiveScopes(null);
         }}
-        onConfirm={(allowElevated) => void handleImportConfirm(allowElevated)}
+        onConfirm={(allowElevated, scopes) => void handleImportConfirm(allowElevated, scopes)}
       />
     </div>
   );
