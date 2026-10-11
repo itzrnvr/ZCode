@@ -103,7 +103,7 @@ export function BrowserSettingsSection({
   const [lastImportResult, setLastImportResult] = useState<ChromeBrowserDataImportResult | null>(
     null,
   );
-
+  const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
   useEffect(() => {
     if (!workspacePath) return;
     void initializePlugins({
