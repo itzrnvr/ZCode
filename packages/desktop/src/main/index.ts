@@ -27,6 +27,7 @@ import {
 } from "./localMediaPreviewProtocol.js";
 import { createDesktopBrowserScreenshotSurfaceCoordinator } from "./browserView/browserScreenshotSurfaceCoordinatorWiring.js";
 import { EMBEDDED_BROWSER_PARTITION } from "./browserDataManager.js";
+import { wireDiagnosticsServer } from "./diagnosticsWiring.js";
 import { EmbeddedBrowserJavaScriptDialogController } from "./embeddedBrowserJavaScriptDialog.js";
 import {
   browserOperationResetsResizeBaseline,
@@ -1923,6 +1924,9 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
 
 app.whenReady().then(async () => {
   markMainLaunchAppReady();
+  // 第一方诊断通道（127.0.0.1:3499，token 在 userData/diagnostics-token）：
+  // agent 看日志/状态/截图/evaluate 不再需要控整台 PC。失败不阻塞启动。
+  wireDiagnosticsServer({ logger });
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,
   });
