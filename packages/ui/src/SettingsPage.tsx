@@ -711,6 +711,7 @@ export function SettingsPage({
   const [httpProxyCaCertPath, setHttpProxyCaCertPath] = useState("");
   const [embeddedBrowserAllowInsecureCertificates, setEmbeddedBrowserAllowInsecureCertificates] =
     useState(false);
+  const [diagnosticsEvaluateEnabled, setDiagnosticsEvaluateEnabled] = useState(false);
   const [taskAutoArchiveEnabled, setTaskAutoArchiveEnabled] = useState(false);
   const [taskAutoArchiveOlderThanDays, setTaskAutoArchiveOlderThanDays] = useState(7);
   const [closeToTrayOnWindows, setCloseToTrayOnWindows] = useState(true);
@@ -796,6 +797,7 @@ export function SettingsPage({
         setEmbeddedBrowserAllowInsecureCertificates(
           settings.embeddedBrowserAllowInsecureCertificates ?? false,
         );
+        setDiagnosticsEvaluateEnabled(settings.diagnosticsEvaluateEnabled ?? false);
         setTaskAutoArchiveEnabled(settings.taskAutoArchiveEnabled ?? false);
         setTaskAutoArchiveOlderThanDays(settings.taskAutoArchiveOlderThanDays ?? 7);
         setCloseToTrayOnWindows(settings.closeToTrayOnWindows ?? true);
@@ -1149,6 +1151,28 @@ export function SettingsPage({
       toast(
         intl.formatMessage({
           id: "settings.embeddedBrowserAllowInsecureCertificatesSavedHint",
+        }),
+      );
+    },
+    [services.settingService, intl],
+  );
+  const handleDiagnosticsEvaluateChange = useCallback(
+    async (enabled: boolean) => {
+      await runSettingsActionAsync({
+        featureId: "settings.diagnostics",
+        action: "toggle_evaluate",
+        trigger: "switch",
+        operation: () => services.settingService.update({ diagnosticsEvaluateEnabled: enabled }),
+        completed: {
+          resultSource: "setting_service",
+          stateAfter: enabled ? "enabled" : "disabled",
+          requiresRestart: true,
+        },
+      });
+      setDiagnosticsEvaluateEnabled(enabled);
+      toast(
+        intl.formatMessage({
+          id: "settings.diagnostics.evaluateSavedHint",
         }),
       );
     },
@@ -1958,6 +1982,8 @@ export function SettingsPage({
                             onEmbeddedBrowserAllowInsecureCertificatesChange={
                               handleEmbeddedBrowserAllowInsecureCertificatesChange
                             }
+                            diagnosticsEvaluateEnabled={diagnosticsEvaluateEnabled}
+                            onDiagnosticsEvaluateChange={handleDiagnosticsEvaluateChange}
                           />
                         ) : activeSection === "computerUse" ? (
                           <ComputerUseSection

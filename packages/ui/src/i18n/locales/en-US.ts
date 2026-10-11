@@ -2518,7 +2518,11 @@ const enUS: Record<string, string> = {
     "Certificate setting saved. Restart the app to take effect.",
   "settings.browser.data.section": "Browser data",
   "settings.browser.desktopOnly": "Browser data can only be managed in the ZCode desktop app.",
-  "settings.browser.import.title": "Import everything from Chrome",
+  "settings.diagnostics.evaluate.title": "Let the agent inspect app screens",
+  "settings.diagnostics.evaluate.description":
+    "Off: the agent reads logs, window state and screenshots only. On: it can also run one-shot read expressions in the app window (restart required). It never moves your pointer or takes focus.",
+  "settings.diagnostics.evaluateSavedHint":
+    "Diagnostics setting saved. Restart the app to take effect.",
   "settings.browser.import.description":
     "Pull cookies, saved passwords, history, bookmarks and site data from your Chrome into the built-in browser once — no relogin, ever. Passwords are decrypted locally on this machine and never leave it.",
   "settings.browser.import.action": "Import everything from Chrome",

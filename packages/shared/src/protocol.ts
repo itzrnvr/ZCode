@@ -267,6 +267,12 @@ export interface AppSettings {
   /** 人类用户主动打开 Browser tab 时的一次性显示偏好；Agent Browser Use 不读写。 */
   embeddedBrowserViewportPreference?: EmbeddedBrowserViewportPreference;
   /**
+   * 本机诊断通道（127.0.0.1:3499）的 renderer 求值开关。默认关：只读
+   * health/state/logs/screenshot；开后 agent 可经 token 执行一次性
+   * renderer 表达式（读 DOM/路由状态），仍不能碰指针/焦点/外部进程。
+   */
+  diagnosticsEvaluateEnabled?: boolean;
+  /**
    * 用户已在设置页关闭输入框的「电脑操作」按钮（内部 hidden 态）。
    * 取 hidden 语义而非 visible：undefined 即默认显示，老用户无需数据迁移。
    * 关闭后按钮不再渲染，且不因重启或版本更新自愈，仅能在设置页重新开启。

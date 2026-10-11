@@ -2369,7 +2369,10 @@ const zhCN: Record<string, string> = {
     "证书校验设置已保存，重启应用后生效",
   "settings.browser.data.section": "浏览器数据",
   "settings.browser.desktopOnly": "浏览器数据只能在 ZCode 桌面端管理。",
-  "settings.browser.import.title": "从 Chrome 一键搬家",
+  "settings.diagnostics.evaluate.title": "允许 agent 查看应用界面",
+  "settings.diagnostics.evaluate.description":
+    "关闭：agent 只能读日志、窗口状态和截图。打开：还能在应用窗口执行一次性只读表达式（需重启）。它永远不会动你的鼠标或抢焦点。",
+  "settings.diagnostics.evaluateSavedHint": "诊断设置已保存，重启应用后生效。",
   "settings.browser.import.description":
     "把 Chrome 的 Cookie、保存的密码、历史、书签和站点数据一次性搬进内置浏览器——以后再也不用重新登录。密码只在本机解密，不会离开这台电脑。",
   "settings.browser.import.action": "从 Chrome 导入全部数据",

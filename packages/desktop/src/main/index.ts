@@ -1924,9 +1924,6 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
 
 app.whenReady().then(async () => {
   markMainLaunchAppReady();
-  // 第一方诊断通道（127.0.0.1:3499，token 在 userData/diagnostics-token）：
-  // agent 看日志/状态/截图/evaluate 不再需要控整台 PC。失败不阻塞启动。
-  wireDiagnosticsServer({ logger });
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,
   });
@@ -1956,7 +1953,10 @@ app.whenReady().then(async () => {
   } catch {
     // 读取失败不影响启动，使用默认 homedir
   }
-
+  // 第一方诊断通道（127.0.0.1:3499，token 在 userData/diagnostics-token）：
+  // agent 看日志/状态/截图/evaluate 不再需要控整台 PC。失败不阻塞启动。
+  // evaluate 需设置显式开（diagnosticsEvaluateEnabled），默认只读。
+  wireDiagnosticsServer({ logger, evaluateEnabled: bootstrapSettings?.diagnosticsEvaluateEnabled ?? false });
   // scheduler 也会打开 tasks-index；等 Host 完成统一准备，避免在启动页出现前抢先迁移。
   configureDatabaseStartupQuit(() => {
     markExplicitQuit("database-startup-exit");

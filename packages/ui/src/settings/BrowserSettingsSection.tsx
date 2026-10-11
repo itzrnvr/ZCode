@@ -29,12 +29,14 @@ import { useSkillStore } from "@/store/skillStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
 
 const OFFICIAL_BROWSER_USE_PLUGIN_ID = "browser-use@zcode-plugins-official";
-
 interface BrowserSettingsSectionProps {
   isDesktop: boolean;
   workspacePath?: string | null;
+  workspaceIdentity?: string;
   embeddedBrowserAllowInsecureCertificates?: boolean;
   onEmbeddedBrowserAllowInsecureCertificatesChange?: (enabled: boolean) => Promise<void>;
+  diagnosticsEvaluateEnabled?: boolean;
+  onDiagnosticsEvaluateChange?: (enabled: boolean) => Promise<void>;
 }
 
 type BrowserDataOperation = "import" | "clear-cache" | "clear-all" | null;
@@ -76,6 +78,8 @@ export function BrowserSettingsSection({
   workspaceIdentity,
   embeddedBrowserAllowInsecureCertificates = false,
   onEmbeddedBrowserAllowInsecureCertificatesChange = async () => {},
+  diagnosticsEvaluateEnabled = false,
+  onDiagnosticsEvaluateChange = async () => {},
 }: BrowserSettingsSectionProps) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
@@ -325,6 +329,23 @@ export function BrowserSettingsSection({
                   checked={embeddedBrowserAllowInsecureCertificates}
                   onCheckedChange={(checked) => {
                     void onEmbeddedBrowserAllowInsecureCertificatesChange(checked);
+                  }}
+                />
+              }
+            />
+            <SettingsRow
+              label={intl.formatMessage({ id: "settings.diagnostics.evaluate.title" })}
+              description={intl.formatMessage({
+                id: "settings.diagnostics.evaluate.description",
+              })}
+              control={
+                <Switch
+                  aria-label={intl.formatMessage({
+                    id: "settings.diagnostics.evaluate.title",
+                  })}
+                  checked={diagnosticsEvaluateEnabled}
+                  onCheckedChange={(checked) => {
+                    void onDiagnosticsEvaluateChange(checked);
                   }}
                 />
               }
