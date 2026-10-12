@@ -1,8 +1,9 @@
 /* eslint-disable max-lines -- Chrome helper、CDP 传输和 Electron 目标写入必须共享同一套敏感数据边界。 */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep as pathSeparator } from "node:path";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { BrowserWindow } from "electron";
 import type { Session, WebContents } from "electron";
 import type { ChromeBrowserDataImportError } from "@zcode/shared";
@@ -359,58 +360,44 @@ async function navigateToStorageOrigin(transport: CdpTransport, origin: string):
   }
 }
 
-async function waitForChromeDebuggerUrl(child: ChildProcessWithoutNullStreams): Promise<string> {
-  return withTimeout(
-    new Promise<string>((resolve, reject) => {
-      let stderr = "";
-      const handleData = (chunk: Buffer) => {
-        stderr = `${stderr}${chunk.toString("utf8")}`.slice(-16_384);
-        const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-        if (match?.[1]) {
-          cleanup();
-          resolve(match[1]);
-        }
-      };
-      const handleError = (error: Error) => {
-        cleanup();
-        reject(error);
-      };
-      const handleExit = () => {
-        cleanup();
-        reject(new Error("chrome_helper_exited"));
-      };
-      const cleanup = () => {
-        child.stderr.off("data", handleData);
-        child.off("error", handleError);
-        child.off("exit", handleExit);
-      };
-      child.stderr.on("data", handleData);
-      child.once("error", handleError);
-      child.once("exit", handleExit);
-    }),
-    CDP_TIMEOUT_MS,
-    "chrome_helper_start",
-  );
+// Chrome 136+ 在 Windows 上的启动器行为：chrome.exe 立即 exit 0，真正的浏览器
+// 进程脱离启动器继续跑（实测 Chrome 154：启动器 0.7s 退出，浏览器在固定端口
+// 正常应答 /json/version）。因此不能把「启动器退出」当失败，也不能依赖启动器
+ // stderr 上的 "DevTools listening" 行——那行属于脱离后的浏览器进程，管道拿不到。
+// 这里改为：预选空闲端口 → 轮询该端口的 /json/list 直到出现 page target。
+async function allocateFreeDebugPort(): Promise<number> {
+  const server = createServer();
+  const { promise: listening, resolve: onListening } = Promise.withResolvers<void>();
+  server.listen(0, "127.0.0.1", () => onListening());
+  await listening;
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
+  server.close(() => onClosed());
+  await closed;
+  return port;
 }
 
-async function findChromePageTarget(browserDebuggerUrl: string): Promise<string> {
-  const browserUrl = new URL(browserDebuggerUrl);
-  const listUrl = `http://${browserUrl.host}/json/list`;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const targets = (await fetch(listUrl).then((response) => response.json())) as Array<{
-      type?: string;
-      webSocketDebuggerUrl?: string;
-    }>;
-    const page = targets.find(
-      (target) => target.type === "page" && typeof target.webSocketDebuggerUrl === "string",
-    );
-    if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+async function findChromePageTarget(debugPort: number): Promise<string> {
+  const listUrl = `http://127.0.0.1:${debugPort}/json/list`;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      const targets = (await fetch(listUrl, { signal: AbortSignal.timeout(1000) }).then(
+        (response) => response.json(),
+      )) as Array<{ type?: string; webSocketDebuggerUrl?: string }>;
+      const page = targets.find(
+        (target) => target.type === "page" && typeof target.webSocketDebuggerUrl === "string",
+      );
+      if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+    } catch {
+      // 浏览器尚未就绪（或启动器刚脱离）：继续轮询直到超时。
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error("chrome_helper_page_missing");
+  throw new Error("chromeₕelperₚageₘissing");
 }
 
-async function stopChromeHelper(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stopChromeHelper(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   child.kill();
@@ -427,6 +414,7 @@ async function runChromeHelper<T>(options: {
   userDataPath: string;
   run: (transport: CdpTransport) => Promise<T>;
 }): Promise<T> {
+  const debugPort = await allocateFreeDebugPort();
   const args = [
     "--headless=new",
     "--disable-gpu",
@@ -439,20 +427,28 @@ async function runChromeHelper<T>(options: {
     "--no-default-browser-check",
     `--user-data-dir=${options.userDataPath}`,
     "--profile-directory=Default",
-    "--remote-debugging-port=0",
+    `--remote-debugging-port=${debugPort}`,
     ...(options.passwordStore ? [`--password-store=${options.passwordStore}`] : []),
     "about:blank",
   ];
   const child = spawn(options.executablePath, args, {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "ignore"],
     windowsHide: true,
   });
+  // 启动器会立即 exit 0 并把浏览器脱离出去（见 allocateFreeDebugPort 注释）；
+  // 就绪信号只看端口轮询，启动器退出/管道错误都不是失败。
+  child.on("error", () => {});
   let transport: WebSocketCdpTransport | null = null;
   try {
-    const debuggerUrl = await waitForChromeDebuggerUrl(child);
-    transport = await WebSocketCdpTransport.connect(await findChromePageTarget(debuggerUrl));
+    transport = await WebSocketCdpTransport.connect(await findChromePageTarget(debugPort));
     return await options.run(transport);
   } finally {
+    // 浏览器已脱离启动器：经 CDP Browser.close 关闭；transport 关闭与启动器 kill 兜底。
+    try {
+      await transport?.send("Browser.close");
+    } catch {
+      // 已断开/已退出：无需处理。
+    }
     transport?.close();
     await stopChromeHelper(child);
   }
@@ -723,7 +719,13 @@ export async function importChromeLocalStorage(options: {
     return result;
   } catch (error) {
     const importError = toLocalStorageImportError(error);
+    // 这一段曾是黑洞：任何异常都被压成同一个错误码，真实根因（errno/名字）
+    // 从不落日志，排查只能靠猜。这里补 errorName+code+message 头，不含站点数据。
+    const err = error as NodeJS.ErrnoException;
     options.logger.warn("[browser-data] Chrome LocalStorage 导入失败", {
+      code: typeof err?.code === "string" ? err.code : undefined,
+      errorName: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message.slice(0, 120) : undefined,
       originCount,
       reason: importError,
     });

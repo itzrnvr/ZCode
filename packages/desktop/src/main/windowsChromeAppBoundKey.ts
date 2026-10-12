@@ -2,8 +2,10 @@
 // 安全说明：签名锁定、进程启动与协议解析必须保留在同一审计边界，避免拆分后重新引入校验/执行间隙。
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
+import { app } from "electron";
 import { ZCODE_COMMIT, ZCODE_VERSION } from "@zcode/shared";
 import {
   createEncodedPowerShellArgs,
@@ -76,6 +78,8 @@ interface HelperProcessResult {
 interface ReadAppBoundKeyOptions {
   appExecutablePath?: string;
   chromeExecutablePath: string;
+  /** fork 构建（无原始发布者证书）跳过 Authenticode 对验；哈希锁与版本握手保留。 */
+  forkFlavor?: string;
   helperPath?: string;
   isPackaged?: boolean;
   logger: BrowserDataLogger;
@@ -90,6 +94,19 @@ interface ReadAppBoundKeyOptions {
   userDataDir: string;
   trustedPowerShellPath?: string;
   verifySignature?: (helperPath: string, appExecutablePath: string) => Promise<boolean | string>;
+}
+
+function isForkFlavorBuild(explicitFlavor?: string): boolean {
+  if (explicitFlavor === "blackbird") return true;
+  if (explicitFlavor !== undefined) return false;
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(app.getAppPath(), "package.json"), "utf8"),
+    ) as { zcodeProductFlavor?: string };
+    return manifest.zcodeProductFlavor === "blackbird";
+  } catch {
+    return false;
+  }
 }
 
 function toSafeProcessError(error: unknown): { code?: string; name: string } {
@@ -333,7 +350,11 @@ async function verifyHelper(helperPath: string, options: ReadAppBoundKeyOptions)
 
     const verifiedHash = await hashHelperFile(helperPath);
 
-    if (packaged) {
+    // Fork 构建（zcodeProductFlavor=blackbird）没有原始发布者证书，无法重签
+    // Authenticode；签名对验只对官方包有意义。fork 跳过签名比对，但保留
+    // 文件哈希锁定（runLockedPackagedHelper 执行期持锁）与版本握手。
+    const signatureCheckApplies = packaged && !isForkFlavorBuild(options.forkFlavor);
+    if (signatureCheckApplies) {
       const verifySignature = options.verifySignature ?? verifyAuthenticodePair;
       const signatureResult = await verifySignature(
         helperPath,

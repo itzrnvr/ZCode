@@ -102,14 +102,16 @@ export async function importChromeBrowserData(options: {
 }): Promise<ChromeBrowserDataImportResult> {
   const platform = options.platform ?? process.platform;
   let detectedChromeExecutablePath = options.chromeExecutablePath;
-  if (platform !== "win32" && !options.profilePath && !detectedChromeExecutablePath) {
+  if (!detectedChromeExecutablePath) {
+    // 可执行发现不再只限非 win32：显式 profilePath（测试/自定义路径）时 win32
+    // 也需要它——App-Bound Cookie/密码与 LocalStorage helper 都拿它启动 Chrome。
     detectedChromeExecutablePath =
       (await (
         options.chromeExecutableDiscovery ?? (() => resolveChromeExecutablePath({ platform }))
       )()) ?? undefined;
-    if (!detectedChromeExecutablePath) {
-      // 过去会先扫描默认 Profile，导致“Chrome 未安装”被误报为 Profile 缺失，
-      // 也无法识别注册在非默认目录的浏览器。先完成可执行文件发现，失败时不访问源数据。
+    if (!detectedChromeExecutablePath && platform !== "win32") {
+      // 过去会先扫描默认 Profile，导致“Chrome 未安装”被误报为 Profile 缺失。
+      // 非 win32 缺可执行是硬失败；win32 可以继续（Profile/History 仍可导入）。
       return emptyImportResult("chrome_executable_not_found");
     }
   }
@@ -178,6 +180,8 @@ export async function importChromeBrowserData(options: {
     if (want("passwords")) {
       options.logger.info("[browser-data] 开始导入 Chrome 密码");
       result.passwords = await importChromePasswords({
+        allowElevated: options.allowElevatedChromeDecryption === true,
+        chromeExecutablePath,
         logger: options.logger,
         platform,
         profilePath,
@@ -190,6 +194,7 @@ export async function importChromeBrowserData(options: {
           }) => Promise<void>;
         },
         userDataDir: dirname(profilePath),
+        windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
       });
     }
 

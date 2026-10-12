@@ -6,6 +6,10 @@ import { join } from "node:path";
 import type { DatabaseSync as NodeSqliteDatabase } from "node:sqlite";
 import type { ChromeBrowserDataImportError } from "@zcode/shared";
 import { readWindowsChromeMasterKey } from "./chromeCredentialManager.js";
+import {
+  readWindowsChromeAppBoundKey,
+  type WindowsChromeAppBoundKeyReader,
+} from "./windowsChromeAppBoundKey.js";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as { DatabaseSync: typeof NodeSqliteDatabase };
 
@@ -29,7 +33,6 @@ interface ChromeLoginRow {
   password_element: string;
   password_value: Uint8Array;
   signon_realm: string;
-  date_created: number | bigint;
   blacklisted_by_user: number;
   times_used: number;
 }
@@ -48,15 +51,15 @@ function pathExists(path: string): Promise<boolean> {
   );
 }
 
-function decryptV10Password(encrypted: Uint8Array, masterKey: Buffer): string {
+function decryptAesGcm(encrypted: Uint8Array, key: Buffer, expectedPrefix: "v10" | "v20"): string {
   const buffer = Buffer.from(encrypted);
-  if (buffer.subarray(0, 3).toString("ascii") !== "v10") {
+  if (buffer.subarray(0, 3).toString("ascii") !== expectedPrefix) {
     throw new Error("chrome_password_encryption_unsupported");
   }
   const nonce = buffer.subarray(3, 15);
   const authTag = buffer.subarray(buffer.length - 16);
   const ciphertext = buffer.subarray(15, buffer.length - 16);
-  const decipher = createDecipheriv("aes-256-gcm", masterKey, nonce);
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
   decipher.setAuthTag(authTag);
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   try {
@@ -66,16 +69,22 @@ function decryptV10Password(encrypted: Uint8Array, masterKey: Buffer): string {
   }
 }
 
+
 /**
  * 从 Chrome `Login Data` 读密码（只读快照，不碰活库）。
- * Windows 用 DPAPI master key 解 v10（与 Cookie 同一密钥）；macOS 走钥匙串 economie——
- * 本阶段只实现 win32，darwin/linux 返回 protection_unsupported 而不是静默 0 条。
+ * v10 = DPAPI master key（同 Cookie 旧格式）；v20 = App-Bound key（Chrome 127+
+ * 新装密码默认），后者需要与 Cookie 相同的 elevation helper，只在
+ * allowElevated 时尝试。非 http(s) 的 login realm（如 android:// 同步占位）
+ * 不能进 web autofill，直接跳过。
  */
 export async function readChromePasswords(options: {
+  allowElevated?: boolean;
+  chromeExecutablePath?: string;
   logger: BrowserDataLogger;
   platform?: NodeJS.Platform;
   profilePath: string;
   userDataDir: string;
+  windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
 }): Promise<{ records: ChromePasswordRecord[]; skipped: number; failed: number }> {
   const platform = options.platform ?? process.platform;
   const loginDataPath = join(options.profilePath, "Login Data");
@@ -95,13 +104,15 @@ export async function readChromePasswords(options: {
     try {
       rows = database
         .prepare(
-          "SELECT origin_url, action_url, username_element, username_value, password_element, password_value, signon_realm, date_created, blacklisted_by_user, times_used FROM logins WHERE blacklisted_by_user = 0",
+          "SELECT origin_url, action_url, username_element, username_value, password_element, password_value, signon_realm, blacklisted_by_user, times_used FROM logins WHERE blacklisted_by_user = 0",
         )
         .all() as unknown as ChromeLoginRow[];
     } finally {
       database.close();
     }
-    const masterKey = await readWindowsChromeMasterKey(options.userDataDir);
+
+    let v10Key: Buffer | null = null;
+    let v20Key: Buffer | null = null;
     const records: ChromePasswordRecord[] = [];
     let skipped = 0;
     let failed = 0;
@@ -111,8 +122,31 @@ export async function readChromePasswords(options: {
           skipped += 1;
           continue;
         }
+        if (!row.signon_realm.startsWith("https://") && !row.signon_realm.startsWith("http://")) {
+          skipped += 1;
+          continue;
+        }
+        const prefix = Buffer.from(row.password_value).subarray(0, 3).toString("ascii");
         try {
-          const password = decryptV10Password(row.password_value, masterKey);
+          let password: string;
+          if (prefix === "v20") {
+            if (!options.allowElevated || !options.chromeExecutablePath) {
+              // App-Bound 密码与 Cookie 同墙：没有本次 UAC 或 Chrome 路径就解
+              // 不了，按跳过计（issues 可见，不算失败）。
+              skipped += 1;
+              continue;
+            }
+            v20Key ??= await (options.windowsChromeAppBoundKeyReader ??
+              readWindowsChromeAppBoundKey)({
+              chromeExecutablePath: options.chromeExecutablePath,
+              logger: options.logger,
+              userDataDir: options.userDataDir,
+            });
+            password = decryptAesGcm(row.password_value, v20Key, "v20");
+          } else {
+            v10Key ??= await readWindowsChromeMasterKey(options.userDataDir);
+            password = decryptAesGcm(row.password_value, v10Key, "v10");
+          }
           if (!password) {
             skipped += 1;
             continue;
@@ -128,7 +162,8 @@ export async function readChromePasswords(options: {
         }
       }
     } finally {
-      masterKey.fill(0);
+      v10Key?.fill(0);
+      v20Key?.fill(0);
     }
     options.logger.info("[browser-data] Chrome 密码快照读取完成", {
       sourceCount: rows.length,
@@ -190,6 +225,8 @@ export async function writeChromePasswordsToSession(options: {
 }
 
 export async function importChromePasswords(options: {
+  allowElevated?: boolean;
+  chromeExecutablePath?: string;
   logger: BrowserDataLogger;
   platform?: NodeJS.Platform;
   profilePath: string;
@@ -197,15 +234,19 @@ export async function importChromePasswords(options: {
     addPasswordRecord?: (record: ChromePasswordRecord) => Promise<void>;
   };
   userDataDir: string;
+  windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
 }): Promise<ChromePasswordImportStats> {
   // 密码阶段绝不能掀翻整个导入：DPAPI 失败、库被锁、master key 缺失——
   // 一律记 failed/skipped 返回。调用方（browserDataManager）不 try/catch 这里。
   try {
     const { records, skipped, failed } = await readChromePasswords({
+      allowElevated: options.allowElevated,
+      chromeExecutablePath: options.chromeExecutablePath,
       logger: options.logger,
       platform: options.platform,
       profilePath: options.profilePath,
       userDataDir: options.userDataDir,
+      windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
     });
     if (records.length === 0) return { imported: 0, skipped, failed };
     const written = await writeChromePasswordsToSession({
@@ -217,7 +258,7 @@ export async function importChromePasswords(options: {
   } catch (error) {
     options.logger.warn(
       "[browser-data] Chrome 密码阶段失败，已降级为跳过",
-      error instanceof Error ? { name: error.name } : {},
+      error instanceof Error ? { name: error.name, message: error.message.slice(0, 120) } : {},
     );
     return { imported: 0, skipped: 0, failed: 1 };
   }
