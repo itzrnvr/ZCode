@@ -28,11 +28,6 @@ import { registerHostServiceResourceTelemetry } from "./hostServiceResourceTelem
 import { resolveResourceTelemetryEnvironmentKey } from "./hostResourceTelemetryEnvironment.js";
 import { reportHostSessionCreate } from "./hostSessionCreateTelemetry.js";
 import { createBrowserControlMainBridge } from "./browserControlMainBridge.js";
-import {
-  RealChromeExtensionBackend,
-  RealChromeRelayClient,
-  startRealChromeRelayServer,
-} from "./realChromeRelayBackend.js";
 import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactMaterializer.js";
 import {
   ServiceCollection,
@@ -233,22 +228,14 @@ function authorizeLocalMediaPreviewPath(path: string): Promise<string> {
   });
 }
 
-// 真实 Chrome（extension 后端）：relay client 常驻；本地 ws 服务延迟到首次
-// tick 之后起——模块顶层同步抛（EADDRINUSE 是异步 error 事件，但构造期其他
-// 异常仍可能毒死 host 启动）。未连时 list() 只报 iab，不伪造。
-const realChromeRelay = new RealChromeRelayClient({ port: 9224 });
-const realChromeBackend = new RealChromeExtensionBackend({ relay: realChromeRelay });
-setImmediate(() => {
-  try {
-    startRealChromeRelayServer({ client: realChromeRelay, port: 9224 });
-  } catch {
-    // 同步构造失败也不炸 host：iab 照常，extension 等下次启动再试。
-  }
-});
+// Real-Chrome extension backend: PARKED. Binding 127.0.0.1:9224 here stole the
+// port from the user's own OMP relay daemon and broke every other client.
+// The client/backend classes stay in realChromeRelayBackend.ts (tests green)
+// but nothing binds or advertises until the port question is redesigned
+// (own port + explicit opt-in). list() therefore reports iab only.
  // browser-use host↔main 桥：把 agent 的 browser 命令经 parentPort 转给 main（WebContentsView+CDP）。
  // parentPort 为空（不应发生于 host 进程）时 postToMain 抛错，bridge 自身返回 backend_unavailable。
 const browserControlMainBridge = createBrowserControlMainBridge({
-  realChromeBackend,
   postToMain: (message) => {
     if (!parentPort) {
       throw new Error("parentPort unavailable");
