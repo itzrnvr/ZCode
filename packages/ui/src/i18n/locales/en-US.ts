@@ -2531,8 +2531,8 @@ const enUS: Record<string, string> = {
     "Blackbird copies sign-in state from your Chrome profile into its built-in browser. Passwords are decrypted on this machine only and never uploaded.",
   "settings.browser.import.chromeRunning":
     "Chrome is still running ({count} background processes). Fully exit Chrome (tray icon → Exit, or Task Manager) before importing — cookies and passwords stay locked while it runs.",
+  "settings.browser.import.dialogConfirm": "Start import",
   "settings.browser.import.scope.cookies": "Cookies",
-  "settings.browser.import.scope.cookies.hint": "Stay signed in everywhere",
   "settings.browser.import.scope.passwords": "Saved passwords",
   "settings.browser.import.scope.passwords.hint": "Decrypted locally, never leaves this PC",
   "settings.browser.import.scope.history": "History & bookmarks",
