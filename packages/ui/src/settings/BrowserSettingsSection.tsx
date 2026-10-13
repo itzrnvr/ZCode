@@ -302,7 +302,13 @@ export function BrowserSettingsSection({
                 operation="import"
                 pendingOperation={pendingOperation}
                 disabled={operationDisabled}
-                onClick={() => setImportDialogOpen(true)}
+                onClick={() => {
+                  // Opening must present fresh scope checkboxes, not the previous
+                  // run's finished view (done=result&&!running flips the dialog
+                  // into Close-only mode otherwise).
+                  setLastImportResult(null);
+                  setImportDialogOpen(true);
+                }}
               >
                 {intl.formatMessage({ id: "settings.browser.import.action" })}
               </BrowserOperationButton>
