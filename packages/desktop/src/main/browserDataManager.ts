@@ -22,6 +22,7 @@ import {
   type ChromeLocalStorageImportStats,
 } from "./chromeLocalStorageManager.js";
 import { importChromePasswords } from "./chromePasswordManager.js";
+import { discoverChromeImportableProfiles } from "./chromeImportableProfiles.js";
 import {
   discoverChromeProfile,
   resolveChromeExecutablePath,
@@ -51,6 +52,16 @@ interface BrowserDataLogger {
   warn: (...args: unknown[]) => void;
 }
 
+/** One importable Chrome profile resolved for the run (explicit or discovered). */
+interface ImportProfileTarget {
+  executablePath?: string;
+  passwordStore?: LinuxChromePasswordStore;
+  profileDirectory: string;
+  profilePath: string;
+  historyModifiedAt: number;
+  userDataDir: string;
+}
+
 function toSafeBrowserDataError(error: unknown): { name: string; code?: string } {
   if (!(error instanceof Error)) return { name: "UnknownError" };
   const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
@@ -62,6 +73,11 @@ function pathExists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+function isProfileLockError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "EBUSY" || code === "EACCES" || code === "EPERM" || code === "ERR_SQLITE_ERROR";
 }
 
 function emptyImportResult(error?: ChromeBrowserDataImportError): ChromeBrowserDataImportResult {
@@ -87,9 +103,9 @@ export async function importChromeBrowserData(options: {
   profilePath?: string;
   platform?: NodeJS.Platform;
   targetSession?: BrowserSessionLike;
-  /** Electron partition 对应的磁盘 profile 目录（History/Bookmarks 文件落点）；缺省跳过文件阶段。 */
+  /** On-disk profile dir of the embedded partition; required for the history stage. */
   targetProfileDir?: string;
-  /** 对话框勾选的作用域；缺省全量。未勾选的阶段跳过（记 skipped，不报错）。 */
+  /** Dialog checkbox scopes; missing means all. */
   scopes?: Record<string, boolean>;
   windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
   localStorageImporter?: (options: {
@@ -103,32 +119,55 @@ export async function importChromeBrowserData(options: {
   const platform = options.platform ?? process.platform;
   let detectedChromeExecutablePath = options.chromeExecutablePath;
   if (!detectedChromeExecutablePath) {
-    // 可执行发现不再只限非 win32：显式 profilePath（测试/自定义路径）时 win32
-    // 也需要它——App-Bound Cookie/密码与 LocalStorage helper 都拿它启动 Chrome。
+    // Resolve the executable on every platform, not just non-win32: the
+    // App-Bound cookie/password key reader and the LocalStorage helper both
+    // need it to launch Chrome.
     detectedChromeExecutablePath =
       (await (
         options.chromeExecutableDiscovery ?? (() => resolveChromeExecutablePath({ platform }))
       )()) ?? undefined;
     if (!detectedChromeExecutablePath && platform !== "win32") {
-      // 过去会先扫描默认 Profile，导致“Chrome 未安装”被误报为 Profile 缺失。
-      // 非 win32 缺可执行是硬失败；win32 可以继续（Profile/History 仍可导入）。
       return emptyImportResult("chrome_executable_not_found");
     }
   }
-  const discovered = options.profilePath
-    ? null
-    : await (options.chromeProfileDiscovery ?? (() => discoverChromeProfile({ platform })))();
-  if (discovered && !discovered.success) return emptyImportResult(discovered.error);
 
-  const profilePath = options.profilePath ?? discovered?.source.profilePath;
-  if (!profilePath || !(await pathExists(profilePath))) {
+  // Profile targets: explicit path (tests / custom flows), or EVERY importable
+  // profile of the main Chrome install. Single-profile discovery used to pick
+  // last-used/Default, which is regularly the WRONG profile (measured live:
+  // Default empty, Profile 1 holds all cookies and passwords). "Import
+  // everything" merges all importable profiles.
+  const profiles: ImportProfileTarget[] = options.profilePath
+    ? [
+        {
+          ...(options.chromeExecutablePath ? { executablePath: options.chromeExecutablePath } : {}),
+          ...(options.chromePasswordStore ? { passwordStore: options.chromePasswordStore } : {}),
+          profileDirectory: "explicit-profile",
+          profilePath: options.profilePath,
+          historyModifiedAt: 0,
+          userDataDir: dirname(options.profilePath),
+        },
+      ]
+    : (await discoverChromeImportableProfiles({ platform })).map((profile) => ({
+        ...(profile.executablePath ? { executablePath: profile.executablePath } : {}),
+        ...(profile.passwordStore
+          ? { passwordStore: profile.passwordStore as LinuxChromePasswordStore }
+          : {}),
+        profileDirectory: profile.profileDirectory,
+        profilePath: profile.profilePath,
+        historyModifiedAt: profile.historyModifiedAt,
+        userDataDir: profile.userDataDir,
+      }));
+  if (profiles.length === 0) {
+    // Fall back to the legacy single-profile discovery for its richer error
+    // codes (not found / ambiguous) before declaring failure.
+    const discovered = await (options.chromeProfileDiscovery ??
+      (() => discoverChromeProfile({ platform })))();
+    if (!discovered.success) return emptyImportResult(discovered.error);
     return emptyImportResult("chrome_profile_not_found");
   }
-  const chromeExecutablePath =
-    options.chromeExecutablePath ??
-    discovered?.source.executablePath ??
-    detectedChromeExecutablePath;
-  const chromePasswordStore = options.chromePasswordStore ?? discovered?.source.passwordStore;
+  const fallbackExecutable = profiles.find((profile) => profile.executablePath)?.executablePath;
+  const chromeExecutablePath = options.chromeExecutablePath ?? fallbackExecutable ?? detectedChromeExecutablePath;
+
   const targetSession =
     options.targetSession ?? electronSession.fromPartition(EMBEDDED_BROWSER_PARTITION);
   const result: ChromeBrowserDataImportResult = {
@@ -138,53 +177,73 @@ export async function importChromeBrowserData(options: {
     passwords: { imported: 0, skipped: 0, failed: 0 },
   };
   const issues = new Set<ChromeBrowserDataImportError>();
+  const want = (scope: string): boolean => options.scopes?.[scope] !== false;
 
-  try {
-    const want = (scope: string): boolean => options.scopes?.[scope] !== false;
-    options.logger.info("[browser-data] 开始导入 Chrome 浏览器数据", {
-      browser: discovered?.source.browser ?? "explicit-profile",
-      profile: discovered?.source.profileDirectory ?? "explicit-profile",
+  for (const target of profiles) {
+    options.logger.info("[browser-data] importing Chrome profile", {
+      profile: target.profileDirectory,
     });
-    const cookieImport = want("cookies")
-      ? await importChromeCookies({
+
+    // Cookies. A locked database (Chrome running) must degrade to an issue on
+    // THIS profile, never kill the whole run — that single throw used to fail
+    // every stage including the ones that work with Chrome open.
+    if (want("cookies")) {
+      try {
+        const cookieImport = await importChromeCookies({
           allowElevatedChromeDecryption: options.allowElevatedChromeDecryption,
           databaseBackup: options.chromeCookieDatabaseBackup,
           chromeCookieHelper: options.chromeCookieHelper,
-          chromeExecutablePath,
-          chromePasswordStore,
+          chromeExecutablePath: target.executablePath ?? chromeExecutablePath,
+          chromePasswordStore: target.passwordStore,
           logger: options.logger,
           macChromeSafeStorageSecretReader: options.macChromeSafeStorageSecretReader,
           platform,
-          profilePath,
+          profilePath: target.profilePath,
           targetSession,
           windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
-        })
-      : { stats: { imported: 0, skipped: 0, failed: 0 }, issues: [], databaseFound: false, rowCount: 0 };
-    result.cookies = cookieImport.stats;
-    for (const issue of cookieImport.issues) issues.add(issue);
+        });
+        result.cookies.imported += cookieImport.stats.imported;
+        result.cookies.skipped += cookieImport.stats.skipped;
+        result.cookies.failed += cookieImport.stats.failed;
+        for (const issue of cookieImport.issues) issues.add(issue);
+      } catch (error) {
+        if (error instanceof ChromeCookieAccessDeniedError) throw error;
+        const lockIssue: ChromeBrowserDataImportError = isProfileLockError(error)
+          ? "chrome_profile_locked"
+          : "chrome_data_import_failed";
+        issues.add(lockIssue);
+        options.logger.warn("[browser-data] cookie stage failed for profile", {
+          code: toSafeBrowserDataError(error).code,
+          profile: target.profileDirectory,
+        });
+      }
+    }
 
-    const localStorageImporter = options.localStorageImporter ?? importChromeLocalStorage;
+    // Site data (LocalStorage).
     if (want("siteData")) {
-      options.logger.info("[browser-data] 开始导入 Chrome LocalStorage");
-      result.localStorage = await localStorageImporter({
-        profilePath,
+      const localStorageImporter = options.localStorageImporter ?? importChromeLocalStorage;
+      const stats = await localStorageImporter({
+        profilePath: target.profilePath,
         targetSession: targetSession as Electron.Session,
         logger: options.logger,
         platform,
-        chromeExecutablePath,
+        chromeExecutablePath: target.executablePath ?? chromeExecutablePath,
       });
-      if (result.localStorage.error) issues.add(result.localStorage.error);
+      result.localStorage.originsImported += stats.originsImported;
+      result.localStorage.entriesImported += stats.entriesImported;
+      result.localStorage.originsSkipped += stats.originsSkipped;
+      result.localStorage.originsFailed += stats.originsFailed;
+      if (stats.error) issues.add(stats.error);
     }
 
-    // 密码：Login Data 经 DPAPI 解后写入目标会话。未勾选则跳过（skipped 可见，不静默吞）。
+    // Passwords. The stage itself never throws; it degrades to failed counts.
     if (want("passwords")) {
-      options.logger.info("[browser-data] 开始导入 Chrome 密码");
-      result.passwords = await importChromePasswords({
+      const stats = await importChromePasswords({
         allowElevated: options.allowElevatedChromeDecryption === true,
-        chromeExecutablePath,
+        chromeExecutablePath: target.executablePath ?? chromeExecutablePath,
         logger: options.logger,
         platform,
-        profilePath,
+        profilePath: target.profilePath,
         targetSession: targetSession as Electron.Session & {
           addPasswordRecord?: (record: {
             originUrl: string;
@@ -193,72 +252,72 @@ export async function importChromeBrowserData(options: {
             password: string;
           }) => Promise<void>;
         },
-        userDataDir: dirname(profilePath),
+        userDataDir: target.userDataDir,
         windowsChromeAppBoundKeyReader: options.windowsChromeAppBoundKeyReader,
       });
+      result.passwords.imported += stats.imported;
+      result.passwords.skipped += stats.skipped;
+      result.passwords.failed += stats.failed;
     }
-
-    // History/Bookmarks/Preferences：文件级快照复制。未勾选或无 targetProfileDir 则跳过。
-    if (want("history") && options.targetProfileDir) {
-      options.logger.info("[browser-data] 开始导入 Chrome History/Bookmarks");
-      result.history = await importChromeHistoryData({
-        logger: options.logger,
-        profilePath,
-        targetProfileDir: options.targetProfileDir,
-      });
-      if (result.history.error) issues.add(result.history.error);
-    }
-
-    result.success =
-      (cookieImport.databaseFound && cookieImport.rowCount === 0) ||
-      result.cookies.imported > 0 ||
-      result.localStorage.originsImported > 0 ||
-      result.passwords.imported > 0 ||
-      (result.history?.visitsCopied === true || result.history?.bookmarksCopied === true);
-    if (!result.success) {
-      result.error = [
-        "chrome_cookie_elevation_required",
-        "chrome_cookie_elevation_cancelled",
-        "chrome_cookie_helper_verification_failed",
-        "chrome_cookie_app_bound_decryption_failed",
-        "chrome_cookie_protection_unsupported",
-      ].find((issue) => issues.has(issue as ChromeBrowserDataImportError)) as
-        | ChromeBrowserDataImportError
-        | undefined;
-      result.error ??= result.localStorage.error ?? "chrome_browser_data_import_unavailable";
-    }
-    if (issues.size > 0) result.issues = [...issues];
-    options.logger.info("[browser-data] Chrome 数据导入完成", {
-      importedCount: result.cookies.imported,
-      skippedCount: result.cookies.skipped,
-      failedCount: result.cookies.failed,
-      importedLocalStorageOrigins: result.localStorage.originsImported,
-      importedLocalStorageEntries: result.localStorage.entriesImported,
-      skippedLocalStorageOrigins: result.localStorage.originsSkipped,
-      failedLocalStorageOrigins: result.localStorage.originsFailed,
-      importedPasswords: result.passwords.imported,
-      historyCopied: result.history?.visitsCopied ?? false,
-      bookmarksCopied: result.history?.bookmarksCopied ?? false,
-    });
-    return result;
-  } catch (error) {
-    if (error instanceof ChromeCookieAccessDeniedError) {
-      // macOS 用户拒绝钥匙串授权后，导入必须作为一个整体停止，不能再进入
-      // LocalStorage 阶段；返回稳定错误码给 renderer 展示明确提示。
-      options.logger.warn("[browser-data] Chrome 数据导入已取消：macOS 钥匙串授权被拒绝");
-      return {
-        ...result,
-        error: "chrome_cookie_access_denied",
-      };
-    }
-    // 只记录错误类型/错误码，不记录 Cookie、LocalStorage 值或绝对 Profile 路径。
-    options.logger.warn("[browser-data] Chrome 数据导入失败", toSafeBrowserDataError(error));
-    return {
-      ...result,
-      ...(issues.size > 0 ? { issues: [...issues] } : {}),
-      error: "chrome_data_import_failed",
-    };
   }
+
+  // History / Bookmarks / Preferences: file-level snapshot from the profile
+  // with the freshest History (bookmarks/preferences live per profile; one
+  // representative keeps the embedded partition coherent).
+  const historyProfile = [...profiles].sort(
+    (left, right) => right.historyModifiedAt - left.historyModifiedAt,
+  )[0];
+  if (want("history") && options.targetProfileDir && historyProfile) {
+    options.logger.info("[browser-data] importing Chrome History/Bookmarks", {
+      profile: historyProfile.profileDirectory,
+    });
+    result.history = await importChromeHistoryData({
+      logger: options.logger,
+      profilePath: historyProfile.profilePath,
+      targetProfileDir: options.targetProfileDir,
+    });
+    if (result.history.error) issues.add(result.history.error);
+  }
+
+  try {
+    await targetSession.cookies.flushStore();
+  } catch {
+    // Best effort; the partition flushes on its own cadence too.
+  }
+
+  result.success =
+    result.cookies.imported > 0 ||
+    result.localStorage.originsImported > 0 ||
+    result.passwords.imported > 0 ||
+    result.history?.visitsCopied === true ||
+    result.history?.bookmarksCopied === true;
+  if (!result.success) {
+    result.error = [
+      "chrome_cookie_elevation_required",
+      "chrome_cookie_elevation_cancelled",
+      "chrome_cookie_helper_verification_failed",
+      "chrome_cookie_app_bound_decryption_failed",
+      "chrome_cookie_protection_unsupported",
+      "chrome_profile_locked",
+    ].find((issue) => issues.has(issue as ChromeBrowserDataImportError)) as
+      | ChromeBrowserDataImportError
+      | undefined;
+    result.error ??= result.localStorage.error ?? "chrome_browser_data_import_unavailable";
+  }
+  if (issues.size > 0) result.issues = [...issues];
+  options.logger.info("[browser-data] Chrome import finished", {
+    profileCount: profiles.length,
+    importedCookies: result.cookies.imported,
+    skippedCookies: result.cookies.skipped,
+    failedCookies: result.cookies.failed,
+    importedLocalStorageOrigins: result.localStorage.originsImported,
+    importedLocalStorageEntries: result.localStorage.entriesImported,
+    failedLocalStorageOrigins: result.localStorage.originsFailed,
+    importedPasswords: result.passwords.imported,
+    historyCopied: result.history?.visitsCopied ?? false,
+    bookmarksCopied: result.history?.bookmarksCopied ?? false,
+  });
+  return result;
 }
 
 export async function clearEmbeddedBrowserData(options: {
@@ -273,13 +332,16 @@ export async function clearEmbeddedBrowserData(options: {
     if (options.mode === "all") {
       await targetSession.clearStorageData();
     } else {
-      // 普通缓存清理不能删除承载登录态的 LocalStorage/IndexedDB。
+      // Plain cache clears must NOT delete LocalStorage/IndexedDB: they carry
+      // the sign-in state this module exists to build.
       await targetSession.clearStorageData({ storages: CACHE_STORAGE_TYPES });
     }
-    options.logger.info("[browser-data] 内置浏览器数据清理完成", { mode: options.mode });
+    options.logger.info("[browser-data] embedded browser data cleared", { mode: options.mode });
     return { success: true };
   } catch {
-    options.logger.warn("[browser-data] 内置浏览器数据清理失败", { mode: options.mode });
+    options.logger.warn("[browser-data] embedded browser data clear failed", {
+      mode: options.mode,
+    });
     return { success: false, error: "embedded_browser_clear_failed" };
   }
 }
