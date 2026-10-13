@@ -716,7 +716,9 @@ contextBridge.exposeInMainWorld("zcode", {
   /** 从自动发现的 Chrome Profile 一次性导入内置浏览器数据。 */
   importChromeBrowserData: (options?: import("@zcode/shared").ChromeBrowserDataImportOptions) =>
     ipcRenderer.invoke(PlatformChannels.ImportChromeBrowserData, options),
-  /** 清理内置浏览器缓存或全部站点数据。 */
+  /** chrome.exe 进程数（含后台）——导入对话框用来提示「先完全退出 Chrome」。 */
+  getChromeProcessCount: (): Promise<{ count: number }> =>
+    ipcRenderer.invoke(PlatformChannels.GetChromeProcessCount),
   clearEmbeddedBrowserData: (mode: "cache" | "all") =>
     ipcRenderer.invoke(PlatformChannels.ClearEmbeddedBrowserData, mode),
   /** 读取开发态 stdio tap proxy 开关状态 */

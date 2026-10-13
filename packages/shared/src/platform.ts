@@ -901,6 +901,8 @@ export interface IPlatformService {
     options?: ChromeBrowserDataImportOptions,
   ): Promise<ChromeBrowserDataImportResult>;
 
+  /** chrome.exe 进程数（含后台进程）；Cookie/密码导入要求 Chrome 完全退出。 */
+  getChromeProcessCount?(): Promise<{ count: number }>;
   /** 清理内置浏览器持久化分区；cache 模式保留认证数据，all 模式清理全部站点数据。 */
   clearEmbeddedBrowserData?(mode: "cache" | "all"): Promise<EmbeddedBrowserDataClearResult>;
 

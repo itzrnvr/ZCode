@@ -430,6 +430,8 @@ const appSettingsObjectSchema = z.object({
   httpProxyNoProxy: nonEmptyStringSchema.optional(),
   httpProxyCaCertPath: nonEmptyStringSchema.optional(),
   embeddedBrowserAllowInsecureCertificates: z.boolean().default(false),
+  /** First-party diagnostics channel (127.0.0.1): renderer evaluate opt-in, off by default. */
+  diagnosticsEvaluateEnabled: z.boolean().default(false),
   embeddedBrowserViewportPreference: embeddedBrowserViewportPreferenceSchema.default(
     DEFAULT_EMBEDDED_BROWSER_VIEWPORT_PREFERENCE,
   ),
@@ -511,7 +513,7 @@ export const appSettingsPatchSchema = z.object({
   httpProxyNoProxy: nonEmptyStringSchema.optional(),
   httpProxyCaCertPath: nonEmptyStringSchema.optional(),
   embeddedBrowserAllowInsecureCertificates: z.boolean().optional(),
-  embeddedBrowserViewportPreference: embeddedBrowserViewportPreferenceSchema.optional(),
+  diagnosticsEvaluateEnabled: z.boolean().optional(),
   computerUseComposerEntryHidden: z.boolean().optional(),
   taskAutoArchiveEnabled: z.boolean().optional(),
   taskAutoArchiveOlderThanDays: z.number().int().positive().max(365).optional(),

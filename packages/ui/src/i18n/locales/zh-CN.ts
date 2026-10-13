@@ -2380,8 +2380,9 @@ const zhCN: Record<string, string> = {
   "settings.browser.import.dialogDescription":
     "把你 Chrome 账号的登录状态复制到内置浏览器。密码只在本机解密，绝不上传。",
   "settings.browser.import.dialogConfirm": "开始导入",
+  "settings.browser.import.chromeRunning":
+    "Chrome 仍在运行（{count} 个后台进程）。请先完全退出 Chrome（托盘图标 → 退出，或任务管理器）再导入——运行期间 Cookie 和密码保持锁定。",
   "settings.browser.import.scope.cookies": "Cookie",
-  "settings.browser.import.scope.cookies.hint": "所有网站保持登录",
   "settings.browser.import.scope.passwords": "保存的密码",
   "settings.browser.import.scope.passwords.hint": "只在本机解密，不离开这台电脑",
   "settings.browser.import.scope.history": "历史与书签",

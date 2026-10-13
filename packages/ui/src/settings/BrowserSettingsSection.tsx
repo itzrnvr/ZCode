@@ -113,6 +113,7 @@ export function BrowserSettingsSection({
     history: true,
     siteData: true,
   });
+  const [chromeProcessCount, setChromeProcessCount] = useState(0);
   const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
   const nativeActionsAvailable =
     isDesktop &&
@@ -126,6 +127,31 @@ export function BrowserSettingsSection({
       pluginService: pluginManagementService,
     });
   }, [initializePlugins, pluginManagementService, workspaceIdentity, workspacePath]);
+
+  // Live chrome.exe counter while the import dialog is open: closing the last
+  // window does NOT exit Chrome (background mode), and cookies/passwords stay
+  // locked. Polling shows the user the real blocker instead of an EBUSY later.
+  useEffect(() => {
+    const getChromeProcessCount = platform.getChromeProcessCount;
+    if (!importDialogOpen || typeof getChromeProcessCount !== "function") {
+      return undefined;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const { count } = await getChromeProcessCount();
+        if (!cancelled) setChromeProcessCount(count);
+      } catch {
+        // counter is advisory; failures just leave the last value
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [importDialogOpen, platform]);
 
   const refreshAfterPluginChange = useCallback(async () => {
     await invalidateDeferredDraftSessionForSkillChange({
@@ -465,6 +491,7 @@ export function BrowserSettingsSection({
         result={lastImportResult}
         liveScopes={importLiveScopes}
         enabledScopes={enabledScopes}
+        chromeProcessCount={chromeProcessCount}
         onToggleScope={(scope) =>
           setEnabledScopes((current) => ({ ...current, [scope]: !current[scope] }))
         }

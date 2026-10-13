@@ -368,6 +368,8 @@ export const PlatformChannels = {
   EmbeddedBrowserJavaScriptDialog: "zcode:embedded-browser-javascript-dialog",
   /** Renderer → Main：把自动发现的本机 Chrome Profile 数据一次性导入内置浏览器分区。 */
   ImportChromeBrowserData: "zcode:import-chrome-browser-data",
+  /** Renderer → Main：查询 chrome.exe 进程数——Cookie/密码导入要求 Chrome 完全退出（含后台进程）。 */
+  GetChromeProcessCount: "zcode:get-chrome-process-count",
   /** Renderer → Main：清理内置浏览器缓存或全部站点数据。 */
   ClearEmbeddedBrowserData: "zcode:clear-embedded-browser-data",
   /** Main → Renderer：通知有新版本已下载完毕，可以重启安装 */

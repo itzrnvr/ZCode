@@ -92,7 +92,6 @@ function dedupeInstallations(installations: ChromeInstallationCandidate[]): Chro
   return result;
 }
 
-/** 枚举一个 Chrome 安装下所有可导入 Profile；找不到任何数据时返回空数组。 */
 export async function discoverChromeImportableProfiles(options: {
   platform?: NodeJS.Platform;
 }): Promise<ChromeImportableProfile[]> {
@@ -100,7 +99,11 @@ export async function discoverChromeImportableProfiles(options: {
   const standardInstallations = buildStandardChromeInstallations({ platform });
   const commandLines = await readRunningChromeProcessCommandLines(platform);
   const runningInstallations = parseRunningChromeInstallations(commandLines, []);
-  const installations = dedupeInstallations([...runningInstallations, ...standardInstallations]);
+  // Standard data dir FIRST: a running Chrome with a custom --user-data-dir
+  // (e.g. an automation client's scratch profile) must not hijack discovery —
+  // the user's real cookies/passwords live in the standard dir. The running
+  // listing stays as a fallback for genuinely portable installs.
+  const installations = dedupeInstallations([...standardInstallations, ...runningInstallations]);
 
   for (const installation of installations) {
     if (!(await pathExists(installation.userDataDir))) continue;
@@ -110,8 +113,6 @@ export async function discoverChromeImportableProfiles(options: {
       const profilePath = join(installation.userDataDir, directory);
       if (!(await hasImportableData(profilePath))) continue;
       if (!executablePath) {
-        // 逐个 candidate 找存在的可执行文件（resolveFirstExistingPath 在
-        // chromeProfileDiscovery 内部，这里就地等价实现，避免导出私有函数）。
         for (const candidate of installation.executablePaths) {
           if (await pathExists(candidate)) {
             executablePath = candidate;

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, LoaderCircle, TriangleAlertIcon } from "lucide-react";
 import type { ChromeBrowserDataImportResult } from "@zcode/shared";
 import {
   AlertDialog,
@@ -93,10 +93,11 @@ function ScopeIcon({ status }: { status: ImportScopeState["status"] }) {
 }
 
 /**
- * Chrome 全量导入确认 + 进度对话框。
- * 点“导入”先弹这个：列出 4 个 scope（Cookie/密码/历史与书签/站点数据），
- * 每个 scope 一行 checkmark 行；开始后行状态随阶段翻转（pending→running→done/failed），
- * 完成显示计数。密码行明确标注“只在本机解密”。
+ * Chrome full-import confirm + progress dialog. Scope rows are checkboxes
+ * before the run (all on by default), status checkmarks with counts after.
+ * A live chrome.exe process counter warns BEFORE starting: Chrome keeps the
+ * profile databases locked (background mode keeps chrome.exe alive with no
+ * windows) and cookies/passwords cannot be read while it runs.
  */
 export function ChromeImportDialog({
   open,
@@ -104,6 +105,7 @@ export function ChromeImportDialog({
   result,
   liveScopes,
   enabledScopes,
+  chromeProcessCount,
   onToggleScope,
   onOpenChange,
   onConfirm,
@@ -113,6 +115,7 @@ export function ChromeImportDialog({
   result: ChromeBrowserDataImportResult | null;
   liveScopes: ImportScopeState[] | null;
   enabledScopes: Record<ImportScopeId, boolean>;
+  chromeProcessCount: number;
   onToggleScope: (scope: ImportScopeId) => void;
   onOpenChange: (open: boolean) => void;
   onConfirm: (allowElevated: boolean, scopes: Record<ImportScopeId, boolean>) => void;
@@ -122,6 +125,7 @@ export function ChromeImportDialog({
   const scopes = liveScopes ?? scopeStateFor(result);
   const done = result !== null && !running;
   const selectable = !running && !done;
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -133,6 +137,21 @@ export function ChromeImportDialog({
             {intl.formatMessage({ id: "settings.browser.import.dialogDescription" })}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {selectable && chromeProcessCount > 0 ? (
+          <div
+            data-import-chrome-running={String(chromeProcessCount)}
+            role="status"
+            className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-ui-sm"
+          >
+            <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+            <span>
+              {intl.formatMessage(
+                { id: "settings.browser.import.chromeRunning" },
+                { count: chromeProcessCount },
+              )}
+            </span>
+          </div>
+        ) : null}
         <div className="space-y-2 py-2" role="list" aria-label="import scopes">
           {scopes.map((scope) =>
             selectable ? (
