@@ -2375,6 +2375,7 @@ const zhCN: Record<string, string> = {
   "settings.diagnostics.evaluateSavedHint": "诊断设置已保存，重启应用后生效。",
   "settings.browser.import.description":
     "把 Chrome 的 Cookie、保存的密码、历史、书签和站点数据一次性搬进内置浏览器——以后再也不用重新登录。密码只在本机解密，不会离开这台电脑。",
+  "settings.browser.import.title": "从 Chrome 导入",
   "settings.browser.import.action": "从 Chrome 导入全部数据",
   "settings.browser.import.dialogTitle": "从 Chrome 导入全部数据？",
   "settings.browser.import.dialogDescription":
@@ -2383,6 +2384,7 @@ const zhCN: Record<string, string> = {
   "settings.browser.import.chromeRunning":
     "Chrome 仍在运行（{count} 个后台进程）。请先完全退出 Chrome（托盘图标 → 退出，或任务管理器）再导入——运行期间 Cookie 和密码保持锁定。",
   "settings.browser.import.scope.cookies": "Cookie",
+  "settings.browser.import.scope.cookies.hint": "登录状态原样复制",
   "settings.browser.import.scope.passwords": "保存的密码",
   "settings.browser.import.scope.passwords.hint": "只在本机解密，不离开这台电脑",
   "settings.browser.import.scope.history": "历史与书签",

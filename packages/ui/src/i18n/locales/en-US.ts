@@ -2525,6 +2525,7 @@ const enUS: Record<string, string> = {
     "Diagnostics setting saved. Restart the app to take effect.",
   "settings.browser.import.description":
     "Pull cookies, saved passwords, history, bookmarks and site data from your Chrome into the built-in browser once — no relogin, ever. Passwords are decrypted locally on this machine and never leave it.",
+  "settings.browser.import.title": "Import from Chrome",
   "settings.browser.import.action": "Import everything from Chrome",
   "settings.browser.import.dialogTitle": "Import everything from Chrome?",
   "settings.browser.import.dialogDescription":
@@ -2533,6 +2534,7 @@ const enUS: Record<string, string> = {
     "Chrome is still running ({count} background processes). Fully exit Chrome (tray icon → Exit, or Task Manager) before importing — cookies and passwords stay locked while it runs.",
   "settings.browser.import.dialogConfirm": "Start import",
   "settings.browser.import.scope.cookies": "Cookies",
+  "settings.browser.import.scope.cookies.hint": "Sign-in sessions copied as-is",
   "settings.browser.import.scope.passwords": "Saved passwords",
   "settings.browser.import.scope.passwords.hint": "Decrypted locally, never leaves this PC",
   "settings.browser.import.scope.history": "History & bookmarks",
