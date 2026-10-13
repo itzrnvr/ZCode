@@ -19,21 +19,30 @@ const HELPER_VERSION = "2";
 const HELPER_TIMEOUT_MS = 90_000;
 const HELPER_MAX_OUTPUT_BYTES = 128 * 1024;
 const HELPER_FILENAME = "zcode-browser-import-helper.exe";
-const APP_BOUND_HELPER_FAILURE_REASONS = new Set([
-  "helper_failed",
-  "broker_initialization_failed",
-  "controller_handshake_failed",
-  "service_channel_failed",
-  "elevation_failed",
-  "timeout",
-  "peer_verification_failed",
-  "service_failed",
-  "validation_failed",
-  "unsupported_key",
-  "cng_failed",
-  "decryption_failed",
-  "service_cleanup_failed",
-]);
+// Stage reasons come from the helper's instrumented DecryptAppBoundKey
+// (stage_system_dpapi / stage_user_dpapi / stage_parse / stage_derive / stage_tag
+// with :detail suffixes). They stay in logs only; the user-facing error code
+// remains chrome_cookie_app_bound_decryption_failed.
+const APP_BOUND_HELPER_FAILURE_REASONS: Record<string, true> = {
+  broker_initialization_failed: true,
+  controller_handshake_failed: true,
+  service_channel_failed: true,
+  elevation_failed: true,
+  timeout: true,
+  peer_verification_failed: true,
+  service_failed: true,
+  validation_failed: true,
+  unsupported_key: true,
+  cng_failed: true,
+  decryption_failed: true,
+  service_cleanup_failed: true,
+  stage_system_dpapi: true,
+  stage_user_dpapi: true,
+  stage_impersonate: true,
+  stage_parse: true,
+  stage_derive: true,
+  stage_tag: true,
+};
 const TRUSTED_WINDOWS_POWERSHELL_ALIAS =
   "\\\\?\\GLOBALROOT\\SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
@@ -57,7 +66,7 @@ export class WindowsChromeAppBoundImportError extends Error {
 function throwAppBoundDecryptionFailure(logger: BrowserDataLogger, reason: string): never {
   // helper 原本返回了稳定子错误码，但通用映射会丢失根因；这里只记录白名单值，禁止记录可能含密钥或路径的原始响应。
   logger.warn("[browser-data] Windows Chrome App-Bound helper 返回失败", {
-    reason: APP_BOUND_HELPER_FAILURE_REASONS.has(reason) ? reason : "invalid_response",
+    reason: reason.split(":")[0]! in APP_BOUND_HELPER_FAILURE_REASONS ? reason : "invalid_response",
   });
   throw new WindowsChromeAppBoundImportError("chrome_cookie_app_bound_decryption_failed");
 }

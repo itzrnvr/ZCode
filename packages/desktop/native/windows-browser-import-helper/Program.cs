@@ -624,6 +624,10 @@ internal static class Program
                     {
                         writer.WriteLine(ErrorResponse("validation_failed"));
                     }
+                    catch (StageException ex)
+                    {
+                        writer.WriteLine(ErrorResponse(ex.Reason));
+                    }
                     catch (UnsupportedKeyException)
                     {
                         writer.WriteLine(ErrorResponse("unsupported_key"));
@@ -654,24 +658,58 @@ internal static class Program
         byte[] content = null;
         try
         {
-            systemPlaintext = DpapiUnprotect(encryptedKey);
+            try
+            {
+                systemPlaintext = DpapiUnprotect(encryptedKey);
+            }
+            catch (Exception ex)
+            {
+                throw new StageException("stage_system_dpapi:" + ex.GetType().Name);
+            }
             if (!ImpersonateNamedPipeClient(pipeHandle.DangerousGetHandle()))
-                throw new InvalidOperationException();
+                throw new StageException("stage_impersonate:" + Marshal.GetLastWin32Error());
             try
             {
                 userPlaintext = DpapiUnprotect(systemPlaintext);
+            }
+            catch (Exception ex)
+            {
+                throw new StageException("stage_user_dpapi:" + ex.GetType().Name);
             }
             finally
             {
                 RevertToSelf();
             }
 
-            ParsedAppBoundBlob parsed = ParseAppBoundBlob(userPlaintext);
+            ParsedAppBoundBlob parsed;
+            try
+            {
+                parsed = ParseAppBoundBlob(userPlaintext);
+            }
+            catch (Exception ex)
+            {
+                throw new StageException("stage_parse:" + ex.GetType().Name + ":len" + (userPlaintext?.Length ?? -1));
+            }
             try
             {
                 content = parsed.Content;
                 ValidateChromePath(parsed.ValidationData, chromeExecutablePath);
                 return DeriveChromeMasterKey(content);
+            }
+            catch (StageException) { throw; }
+            catch (ChromeValidationException) { throw; }
+            catch (CngException) { throw; }
+            catch (UnsupportedKeyException)
+            {
+                throw new StageException(
+                    "stage_derive:flag" + (content != null && content.Length > 0 ? content[0].ToString() : "?") +
+                    ":len" + (content?.Length ?? -1));
+            }
+            catch (Exception ex)
+            {
+                throw new StageException(
+                    "stage_tag:flag" + (content != null && content.Length > 0 ? content[0].ToString() : "?") +
+                    ":len" + (content?.Length ?? -1) + ":" + ex.GetType().Name);
             }
             finally
             {
@@ -684,6 +722,12 @@ internal static class Program
             Zero(userPlaintext);
             Zero(content);
         }
+    }
+
+    private sealed class StageException : Exception
+    {
+        internal StageException(string reason) : base(reason) { Reason = reason; }
+        internal string Reason { get; }
     }
 
     private static ParsedAppBoundBlob ParseAppBoundBlob(byte[] data)
