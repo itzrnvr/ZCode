@@ -51,7 +51,7 @@ interface BrowserDataLogger {
   warn: (...args: unknown[]) => void;
 }
 
-type WindowsChromeAppBoundImportErrorCode =
+export type WindowsChromeAppBoundImportErrorCode =
   | "chrome_cookie_elevation_cancelled"
   | "chrome_cookie_helper_verification_failed"
   | "chrome_cookie_app_bound_decryption_failed";
@@ -102,7 +102,10 @@ interface ReadAppBoundKeyOptions {
   ) => Promise<HelperProcessResult>;
   userDataDir: string;
   trustedPowerShellPath?: string;
-  verifySignature?: (helperPath: string, appExecutablePath: string) => Promise<boolean | string>;
+  verifySignature?: (
+    helperPath: string,
+    appExecutablePath: string,
+  ) => Promise<boolean | string>;
 }
 
 function isForkFlavorBuild(explicitFlavor?: string): boolean {
@@ -163,7 +166,7 @@ async function resolveHelperPath(options: ReadAppBoundKeyOptions): Promise<strin
   return candidates[0]!;
 }
 
-function createSanitizedHelperEnvironment(
+export function createSanitizedHelperEnvironment(
   sourceEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const allowed = [

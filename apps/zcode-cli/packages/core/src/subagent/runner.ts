@@ -3,6 +3,7 @@
 // Subagent Runner
 // ============================================================
 
+import type { GetAgentDefinitions } from "./definitions.js";
 import {
   AgentErrorCode,
   CoreErrorType,
@@ -119,6 +120,7 @@ export interface ExploreSubagentPortOptions {
   outputRootDir?: string;
   profiles?: readonly AgentProfile[];
   getAgentProfiles?: () => readonly AgentProfile[] | undefined;
+  getAgentDefinitions?: GetAgentDefinitions;
   builtInModelSelectionOverrides?: Partial<Record<"general-purpose" | "Explore", ModelSelection>>;
   getBuiltInModelSelectionOverrides?: () =>
     | Partial<Record<"general-purpose" | "Explore", ModelSelection>>
@@ -145,10 +147,11 @@ export function createExploreSubagentPort(
   // 可见集合停在端口创建时的快照（新创建的子智能体对已激活会话报 UNKNOWN_AGENT_TYPE）。
   let builtInModelSelectionOverrides = options.builtInModelSelectionOverrides;
   const resolveActiveProfiles = (): AgentProfile[] => {
+    const fromDefinitions = options.getAgentDefinitions?.().activeAgents;
     const liveOverrides =
       options.getBuiltInModelSelectionOverrides?.() ?? builtInModelSelectionOverrides;
-    const liveProfiles = options.getAgentProfiles?.();
-    return normalizeAgentProfiles(liveProfiles ?? options.profiles ?? [], {
+    const liveProfiles = options.getAgentProfiles?.() ?? fromDefinitions ?? options.profiles ?? [];
+    return normalizeAgentProfiles(liveProfiles, {
       builtInModelSelectionOverrides: liveOverrides,
     });
   };
@@ -602,7 +605,7 @@ export function createExploreSubagentPort(
     ): Promise<SubagentSendMessageResult> {
       return sendMessageToLocalAgent(
         options,
-        resolveActiveProfiles(),
+        resolveActiveProfiles,
         registry,
         abortControllers,
         request,
@@ -937,7 +940,7 @@ function createSubagentLifecycleFromTask(
 
 async function sendMessageToLocalAgent(
   options: ExploreSubagentPortOptions,
-  profiles: readonly AgentProfile[],
+  getProfiles: () => readonly AgentProfile[],
   registry: RuntimeTaskRegistry,
   abortControllers: Map<string, AbortController>,
   request: SubagentSendMessageRequest,
@@ -962,7 +965,7 @@ async function sendMessageToLocalAgent(
 
   return resumeTerminalAgentInBackground(
     options,
-    profiles,
+    getProfiles(),
     registry,
     abortControllers,
     task,

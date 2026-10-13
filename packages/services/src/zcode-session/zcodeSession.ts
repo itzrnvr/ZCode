@@ -6,6 +6,7 @@ import type {
   ZCodeMessageWithParts,
   ModelSelection,
   ZCodePermissionRequestParams,
+  ZCodeProviderRuntimeHeadersRequestParams,
   ZCodeUserInputRequestParams,
   ZCodeUserInputResponse,
   ZCodeSessionInfo,
@@ -19,6 +20,7 @@ import type {
 } from "@zcode/shared";
 import type { ZCodeAgentRuntimePolicy } from "../zcode-agent/zcodeAgent.js";
 import { createServiceDescriptor } from "#src/descriptors.js";
+import type { ProviderRuntimeHeadersUiResponse } from "#src/zcode-agent/zcodeAgent.js";
 
 export interface ZCodeSessionWorkspaceTarget {
   workspacePath: string;
@@ -94,6 +96,11 @@ export interface ZCodeSessionSetModeParams extends ZCodeTaskTarget {
   expectedRevision?: number;
 }
 
+export interface ZCodeSessionRespondProviderRuntimeHeadersParams extends ZCodeTaskTarget {
+  requestId: string;
+  response: ProviderRuntimeHeadersUiResponse;
+}
+
 export interface ZCodeSessionSubscribeParams extends ZCodeTaskTarget {
   deliveryKind: ZCodeDeliveryKind;
   afterSeq?: number;
@@ -114,6 +121,7 @@ export type ZCodeSessionServiceEvent =
       requestId: string;
       response: ZCodeUserInputResponse;
     }
+  | { type: "providerRuntimeHeaders.request"; request: ZCodeProviderRuntimeHeadersRequestParams }
   | { type: "snapshot"; snapshot: ZCodeSessionStateSnapshot };
 
 export interface ZCodeSessionInitializeResult {
@@ -155,7 +163,12 @@ export interface IZCodeSessionService {
   setModel(params: ZCodeSessionSetModelParams): Promise<ZCodeSessionStateSnapshot>;
   setThoughtLevel(params: ZCodeSessionSetThoughtLevelParams): Promise<ZCodeSessionStateSnapshot>;
   setMode(params: ZCodeSessionSetModeParams): Promise<ZCodeSessionStateSnapshot>;
-  // renderer 订阅面走 agentService 的 conversation/sessions-index 帧通道。
+  respondProviderRuntimeHeaders(
+    params: ZCodeSessionRespondProviderRuntimeHeadersParams,
+  ): Promise<void>;
+  // M5 删波次 2：onDynamicSessionEvent（旧 session/subscribe 词表的 renderer 订阅面）
+  // 已删除——v4 UI 走 agentService 的 conversation/sessions-index 帧通道，
+  // 该方法在 renderer 侧已无任何调用者（grep packages/ui packages/desktop 为零）。
 }
 
 export const IZCodeSessionService = createServiceDescriptor<IZCodeSessionService>(

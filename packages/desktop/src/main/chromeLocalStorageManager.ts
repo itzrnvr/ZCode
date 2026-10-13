@@ -90,7 +90,7 @@ function toSafeFileSystemError(error: unknown): { name: string; code?: string } 
   return { name: error.name || "Error", ...(code ? { code } : {}) };
 }
 
-async function cleanupChromeHelperTempRoot(options: {
+export async function cleanupChromeHelperTempRoot(options: {
   logger: BrowserDataLogger;
   remover?: RecursiveDirectoryRemover;
   tempRoot: string;
@@ -175,7 +175,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
-async function discoverChromeLocalStorageOrigins(localStoragePath: string): Promise<string[]> {
+export async function discoverChromeLocalStorageOrigins(
+  localStoragePath: string,
+): Promise<string[]> {
   const levelDbPath = join(localStoragePath, "leveldb");
   if (!(await pathExists(levelDbPath))) return [];
 

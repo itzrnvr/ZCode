@@ -73,7 +73,7 @@ export const COLD_VIEW_DEFERRED_SOURCES = [
 export type ColdDeferredSource = (typeof COLD_VIEW_DEFERRED_SOURCES)[number];
 
 /** 协调器需要的宿主能力窄面（与 V4GatewayHost 同形，避免循环 import）。 */
-interface ColdSessionResumeHost {
+export interface ColdSessionResumeHost {
   resumePersistedSession?(
     sessionId: string,
     resumeThoughtLevel?: string,

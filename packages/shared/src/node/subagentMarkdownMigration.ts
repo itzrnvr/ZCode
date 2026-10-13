@@ -6,7 +6,7 @@ import { importSubagentStateSelections } from "../subagent-state-migration.js";
 import { SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES } from "../skill-scan-policy.js";
 import { withFileLock } from "./privateFilePersistence.js";
 
-interface SubagentMarkdownMigrationResult {
+export interface SubagentMarkdownMigrationResult {
   migrated: string[];
   failures: Array<{ path: string; error: unknown }>;
 }

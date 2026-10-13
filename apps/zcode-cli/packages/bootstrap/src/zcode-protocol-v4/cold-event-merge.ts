@@ -20,7 +20,6 @@ import {
  * entry（entry 不推进水位，指纹必须显式盖住它）。
  */
 export const SHARED_CONTEXT_IMPORT_ENTRY_TYPE = "v4/shared_context_import";
-
 export interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
@@ -134,7 +133,7 @@ export async function loadPersistedConversationMaterialization(input: {
   };
 }
 
-interface ColdEventMergeDiagnostic {
+export interface ColdEventMergeDiagnostic {
   code:
     | "cold_merge.durable_event_suppressed"
     | "cold_merge.ambiguous_legacy_turn_preserved"
@@ -168,6 +167,13 @@ interface MergeInput {
   target?: SessionGoal | null;
 }
 
+const LIVE_ONLY_EVENT_TYPES = new Set<string>([
+  SessionEventType.PluginUiResourceUpdated,
+  SessionEventType.PluginUiResourceListChanged,
+  SessionEventType.PluginUiAppToolCallRequested,
+  SessionEventType.PluginUiInstanceClosed,
+]);
+
 const MEMORY_ONLY_EVENT_TYPES = new Set<string>([
   SessionEventType.SessionResumed,
   SessionEventType.SessionTitleUpdated,
@@ -186,6 +192,7 @@ const MEMORY_ONLY_EVENT_TYPES = new Set<string>([
   SessionEventType.DynamicWorkflowRunProgress,
   SessionEventType.TargetChanged,
   SessionEventType.RewindTriggered,
+  SessionEventType.TurnExecutionModelFallback,
 ]);
 
 const TRANSCRIPT_DERIVED_EVENT_TYPES = new Set<string>([
@@ -916,6 +923,11 @@ export function mergeColdConversationEvents(input: MergeInput): ColdEventMergeRe
       // session_target 已是持久权威，旧 merge 却把内存 TargetChanged 当
       // ephemeral 尾事件追加，冷恢复终态会被旧 goal 覆盖；显式 null 也必须压掉旧事件。
       recordDiagnostic(diagnostics, "cold_merge.durable_event_suppressed", event);
+      return;
+    }
+    if (LIVE_ONLY_EVENT_TYPES.has(event.type)) {
+      // 插件 UI 资源通知只对当时活着的沙箱实例有意义，冷恢复一律丢弃。
+      recordDiagnostic(diagnostics, "cold_merge.non_product_event_suppressed", event);
       return;
     }
     if (MEMORY_ONLY_EVENT_TYPES.has(event.type)) {

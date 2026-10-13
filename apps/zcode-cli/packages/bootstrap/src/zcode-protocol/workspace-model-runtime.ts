@@ -77,6 +77,7 @@ export async function createWorkspaceZCodeApp(
     options.providerRuntimeHeadersPort ?? createProviderRuntimeHeadersPort(context, workspace);
   return context.deps.createZCodeApp({
     ...options,
+    includeVisualize: true,
     platform: context.deps.platform,
     providerRuntimeHeadersPort,
     runtimeConfig: {

@@ -1,5 +1,9 @@
 import { createRoot } from "react-dom/client";
-import type { ResourceUsageSnapshot, StorageManagementBridge } from "@zcode/shared";
+import type {
+  NetworkCaptureBridge,
+  ResourceUsageSnapshot,
+  StorageManagementBridge,
+} from "@zcode/shared";
 import "@zcode/ui/styles.css";
 import {
   ResourceManagerApp,
@@ -21,6 +25,7 @@ declare global {
       getSnapshot: () => Promise<ResourceUsageSnapshot>;
       setSamplingActive: (active: boolean) => void;
       storage?: StorageManagementBridge;
+      network?: NetworkCaptureBridge;
     };
   }
 }
@@ -70,6 +75,7 @@ if (root) {
           window.resourceManager ? () => window.resourceManager!.getSnapshot() : undefined
         }
         storage={window.resourceManager?.storage}
+        network={window.resourceManager?.network}
       />
     </ZCodeIntlProvider>,
   );

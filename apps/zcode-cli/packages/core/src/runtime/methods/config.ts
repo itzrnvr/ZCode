@@ -27,6 +27,7 @@ import type { AgentRuntimeInternal } from "../internal.js";
 import { cloneModelSelection } from "../model-selection.js";
 import { applyRuntimeExecutionState } from "../execution-state.js";
 
+import { mirrorSubagentInteractionEvent } from "../../subagent/tool-event-mirror.js";
 import { orderProviderVisibleToolContracts } from "../../tool/provider-visible-order.js";
 import { projectToolModelContract } from "../../tool/model-contract.js";
 import { rebuildContextPrefix } from "./context-refresh.js";
@@ -100,20 +101,15 @@ export function refreshSubagentProfiles(
     };
     // 描述里的 Explore 工具后缀与工作流行必须与装配时一致：用同一推导重建，
     // 同名覆盖（silent），再失效工具缓存——与 shell 快照那条刷新路径同语义。
-    const embeddedSearchEnabled = resolveRuntimeEmbeddedSearchEnabled(this);
-    const dynamicWorkflowEnabled = resolveRuntimeDynamicWorkflowToolsIncluded(this.config);
+    const dynamicWorkflowEnabled = resolveRuntimeDynamicWorkflowToolsIncluded(this);
     this.registry.register(
       createAgentToolEntry({
-        embeddedSearchEnabled,
-        profiles,
         dynamicWorkflowEnabled,
       }),
       { silentDuplicateWarning: true },
     );
     this.registry.register(
       createTaskToolEntry({
-        embeddedSearchEnabled,
-        profiles,
         dynamicWorkflowEnabled,
       }),
       { silentDuplicateWarning: true },
@@ -251,14 +247,27 @@ export function getSessionEventStore(this: AgentRuntimeInternal): SessionEventSt
  */
 export async function notifyExternalChildSessionEvent(
   this: AgentRuntimeInternal,
-  input: { childSessionId: SessionId; event: SessionEvent; traceContext?: TraceContext },
+  input: {
+    childSessionId: SessionId;
+    event: SessionEvent;
+    traceContext?: TraceContext;
+    interactionOrigin?: ChildClientPortsContext;
+  },
 ): Promise<void> {
+  const traceContext = input.traceContext ?? this.rootTraceContext;
   // 只通知、绝不 append：子 runtime 已经按自己的 sessionId 把这条事件落库了，
   // 再走父 runtime 的 append 链路会造成同一事件在共享 store 里出现两份。
-  await this.notifyEventSinks(input.event, {
-    ...(input.traceContext ?? this.rootTraceContext),
-    sessionId: input.childSessionId,
+  await this.notifyEventSinks(input.event, { ...traceContext, sessionId: input.childSessionId });
+  if (input.interactionOrigin === undefined) return;
+  // Bug 根因（2026-09-23 实机）：guarded dwf actor 的权限请求经父 broker 到了桌面，但 V4 的
+  // 确认窗只从**父会话**实时投影的 PermissionRequested 生成；这条事件只在子会话里，窗不出现，
+  // actor 永久等待。与 core subagent 同款镜像（只镜像交互，父 timeline 不收工具活动），同样只通知不 append。
+  const mirrored = mirrorSubagentInteractionEvent(input.event, {
+    ...input.interactionOrigin,
+    parentSessionId: this.sessionId,
   });
+  if (mirrored === undefined) return;
+  await this.notifyEventSinks(mirrored, { ...traceContext, sessionId: this.sessionId });
 }
 
 /**
