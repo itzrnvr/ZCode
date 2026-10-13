@@ -3837,6 +3837,21 @@ export class BrowserGuestManager {
       }
     }
     if (!tab.cachedUrl) return false;
+    // dotless 主机（https://google/ 这类历史产物）在公共 DNS 上不可解析，恢复它
+    // 只会每次都 ERR_NAME_NOT_RESOLVED；保持 about:blank，等用户显式导航。
+    try {
+      const host = new URL(tab.cachedUrl).hostname;
+      if (
+        !host.includes(".") &&
+        host !== "localhost" &&
+        !host.endsWith(".localhost") &&
+        !/^\d+\.\d+\.\d+\.\d+$/.test(host)
+      ) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
     try {
       await guest.loadURL(tab.cachedUrl);
       return true;

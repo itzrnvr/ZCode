@@ -22,6 +22,7 @@ import {
   DEFAULT_BROWSER_URL,
   INITIAL_BROWSER_STATE,
   displayBrowserUrl,
+  hasRoutableBrowserHost,
   isDefaultBrowserOpenableUrl,
   isRecoverableBrowserGuestExitReason,
   normalizeBrowserUrl,
@@ -848,6 +849,9 @@ export function UnifiedBrowserView({
   // ---- 挂载时导航到初始/恢复 URL（human tab 恢复态）----
   useEffect(() => {
     if (!initialUrl || initialUrl === DEFAULT_BROWSER_URL) return;
+    // 历史上地址栏规则产生过 dotless 主机 URL（https://google/），恢复它只会
+    // 每次打开都 ERR_NAME_NOT_RESOLVED；放弃导航，停在 about:blank。
+    if (!hasRoutableBrowserHost(initialUrl)) return;
     lastRestorableUrlRef.current = initialUrl;
     if (lastAppliedInitialUrlRef.current === initialUrl) return;
     if (browserState.currentUrl === initialUrl) {

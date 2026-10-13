@@ -293,6 +293,39 @@ function shouldPreferHttpForSchemeLessUrl(parsed: URL, explicitPort: string | nu
   return false;
 }
 
+/**
+ * 无点、无端口的输入（单词如 "google"，或短语如 "what is rust"）在公共 DNS 上
+ * 无法作为主机名解析；直接补 https:// 只会得到 ERR_NAME_NOT_RESOLVED。按浏览器
+ * 地址栏惯例视为搜索查询，而不是主机名猜测。带点/带冒号的输入仍按 URL 处理。
+ */
+function isSearchLikeBrowserInput(input: string): boolean {
+  if (/[.:]/.test(input)) {
+    return false;
+  }
+  return input.toLowerCase() !== "localhost";
+}
+
+/**
+ * 恢复路径守卫：持久化 tab 状态里可能存着 dotless 主机 URL（历史上地址栏
+ * 补协议规则产生的 https://google/ 之类），这种 URL 每次恢复都必然
+ * ERR_NAME_NOT_RESOLVED。识别出来后放弃恢复导航，保持 about:blank。
+ */
+export function hasRoutableBrowserHost(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return true;
+    }
+    return (
+      parsed.hostname.includes(".") ||
+      isLocalDevelopmentHost(parsed.hostname) ||
+      parseIpv4Address(parsed.hostname) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
 function inferBrowserUrl(input: string): string {
   const normalizedInput = normalizeBareIpv6LoopbackInput(input);
   const parsed = parseSchemeLessUrl(normalizedInput);
@@ -318,7 +351,11 @@ export function normalizeBrowserUrl(input: string): string | null {
     return null;
   }
 
-  const url = hasAllowedExplicitProtocol(trimmed) ? trimmed : inferBrowserUrl(trimmed);
+  const url = hasAllowedExplicitProtocol(trimmed)
+    ? trimmed
+    : isSearchLikeBrowserInput(trimmed)
+      ? `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
+      : inferBrowserUrl(trimmed);
   return isAllowedBrowserUrl(url) ? url : null;
 }
 
