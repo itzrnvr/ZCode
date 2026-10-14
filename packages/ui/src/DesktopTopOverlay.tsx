@@ -1,4 +1,9 @@
-import type { IPlatformService, UpdateStatePayload } from "@zcode/shared";
+import {
+  ZCODE_PRODUCT_FLAVOR,
+  type IPlatformService,
+  type UpdateStatePayload,
+} from "@zcode/shared";
+import { BlackbirdAccentLogoMark } from "@/BlackbirdAccentLogoMark.js";
 import { cn } from "@/components/lib/utils.js";
 import {
   ArrowLeftIcon,
@@ -139,12 +144,16 @@ export function DesktopTopOverlay({
               buttonClassName="group relative overflow-hidden rounded-lg"
               onClick={onToggleSidebar}
             >
-              <img
-                src={appLogoUrl}
-                alt="ZCode"
-                className="size-5 transition-opacity duration-150 group-hover:opacity-0"
-                draggable={false}
-              />
+              {ZCODE_PRODUCT_FLAVOR === "blackbird" ? (
+                <BlackbirdAccentLogoMark className="size-5 transition-opacity duration-150 group-hover:opacity-0" />
+              ) : (
+                <img
+                  src={appLogoUrl}
+                  alt="ZCode"
+                  className="size-5 transition-opacity duration-150 group-hover:opacity-0"
+                  draggable={false}
+                />
+              )}
               <SidebarToggleIcon className="absolute inset-0 m-auto size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
             </DesktopTopOverlayActionButton>
           )}

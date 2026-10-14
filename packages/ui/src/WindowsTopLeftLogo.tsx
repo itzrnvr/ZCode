@@ -1,9 +1,8 @@
 import { cn } from "@/components/lib/utils.js";
 // Fork: Blackbird top-left mark follows the same flavor gate as App.
 import zaiLogoUrl from "@/assets/provider-icons/logo-zai.svg";
-import blackbirdLogoUrl from "@/assets/provider-icons/logo-blackbird.svg";
 import { ZCODE_PRODUCT_FLAVOR } from "@zcode/shared";
-const resolvedTopLeftLogoUrl = ZCODE_PRODUCT_FLAVOR === "blackbird" ? blackbirdLogoUrl : zaiLogoUrl;
+import { BlackbirdAccentLogoMark } from "@/BlackbirdAccentLogoMark.js";
 
 export function WindowsTopLeftLogo({
   className,
@@ -23,12 +22,18 @@ export function WindowsTopLeftLogo({
         className,
       )}
     >
-      <img
-        src={resolvedTopLeftLogoUrl}
-        alt="ZCode"
-        className={cn("pointer-events-none size-5 select-none", imageClassName)}
-        draggable={false}
-      />
+      {ZCODE_PRODUCT_FLAVOR === "blackbird" ? (
+        <BlackbirdAccentLogoMark
+          className={cn("pointer-events-none size-5 select-none", imageClassName)}
+        />
+      ) : (
+        <img
+          src={zaiLogoUrl}
+          alt="ZCode"
+          className={cn("pointer-events-none size-5 select-none", imageClassName)}
+          draggable={false}
+        />
+      )}
     </div>
   );
 }
