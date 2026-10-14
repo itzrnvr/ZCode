@@ -2718,13 +2718,18 @@ const zhCN: Record<string, string> = {
   "settings.browser.import.title": "从 Chrome 导入",
   "settings.browser.import.lastImport":
     "上次导入 {date} — 已复制 {cookies} 条 Cookie · {passwords} 个密码 · {origins} 个站点。重复导入按合并处理，不会产生重复数据。",
+  "settings.browser.import.progressLine": "{stage}",
+  "settings.browser.import.progress.closingChrome": "正在关闭 Chrome 后台进程（剩余 {detail} 个）…",
+  "settings.browser.import.progress.profile": "正在导入 Profile {profile}",
+  "settings.browser.import.progress.working": "处理中…",
+  "settings.browser.import.profileError": "{profile}：{error}",
   "settings.browser.import.action": "从 Chrome 导入全部数据",
   "settings.browser.import.dialogTitle": "从 Chrome 导入全部数据？",
   "settings.browser.import.dialogDescription":
     "把你 Chrome 账号的登录状态复制到内置浏览器。密码只在本机解密，绝不上传。",
   "settings.browser.import.dialogConfirm": "开始导入",
   "settings.browser.import.chromeRunning":
-    "Chrome 仍在运行（{count} 个后台进程）。请先完全退出 Chrome（托盘图标 → 退出，或任务管理器）再导入——运行期间 Cookie 和密码保持锁定。",
+    "Chrome 仍在后台运行（{count} 个进程），Cookie 和密码库处于锁定状态。点击下方确认后，Blackbird 会先帮你正确关闭 Chrome 后台进程再导入（随后弹出的 UAC 用于安全解密步骤）。",
   "settings.browser.import.scope.cookies": "Cookie",
   "settings.browser.import.scope.cookies.hint": "登录状态原样复制",
   "settings.browser.import.scope.passwords": "保存的密码",

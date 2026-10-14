@@ -811,6 +811,12 @@ contextBridge.exposeInMainWorld("zcode", {
   /** chrome.exe 进程数（含后台）——导入对话框用来提示「先完全退出 Chrome」。 */
   getChromeProcessCount: (): Promise<{ count: number }> =>
     ipcRenderer.invoke(PlatformChannels.GetChromeProcessCount),
+  /** 订阅导入实时进度推流；返回 disposer。 */
+  onChromeImportProgress: (callback: (update: unknown) => void): (() => void) => {
+    const handler = (_event: unknown, update: unknown): void => callback(update as never);
+    ipcRenderer.on(PlatformChannels.ChromeImportProgress, handler);
+    return () => ipcRenderer.removeListener(PlatformChannels.ChromeImportProgress, handler);
+  },
   clearEmbeddedBrowserData: (mode: "cache" | "all") =>
     ipcRenderer.invoke(PlatformChannels.ClearEmbeddedBrowserData, mode),
   /** 读取开发态 stdio tap proxy 开关状态 */

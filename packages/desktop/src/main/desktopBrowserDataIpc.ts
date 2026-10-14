@@ -58,15 +58,24 @@ export function registerBrowserDataIpcHandlers(logger: {
   info: (...args: unknown[]) => void;
   warn: (...args: unknown[]) => void;
 }) {
-  ipcMain.handle(PlatformChannels.ImportChromeBrowserData, async (_event, value: unknown) => {
+  ipcMain.handle(PlatformChannels.ImportChromeBrowserData, async (event, value: unknown) => {
     const requested = value as ChromeBrowserDataImportOptions | undefined;
     // The renderer may only pass true explicitly per call; main never accepts
     // or persists any other authorization form.
     const allowElevatedChromeDecryption = requested?.allowElevatedChromeDecryption === true;
     const scopes = requested?.scopes;
+    // 用户在对话框里明确点了「关闭 Chrome 并导入」才会置位；main 只接受本次
+    // 调用内的显式授权，绝不持久化。
+    const closeChromeFirst = requested?.closeChromeFirst === true;
     return await importChromeBrowserData({
       allowElevatedChromeDecryption,
       scopes,
+      closeChromeFirst,
+      onProgress: (update) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(PlatformChannels.ChromeImportProgress, update);
+        }
+      },
       targetProfileDir: await resolveEmbeddedProfileDir(),
       logger,
     });

@@ -106,6 +106,8 @@ export function ChromeImportDialog({
   liveScopes,
   enabledScopes,
   chromeProcessCount,
+  progress,
+  profileIssues,
   onToggleScope,
   onOpenChange,
   onConfirm,
@@ -116,9 +118,16 @@ export function ChromeImportDialog({
   liveScopes: ImportScopeState[] | null;
   enabledScopes: Record<ImportScopeId, boolean>;
   chromeProcessCount: number;
+  /** 实时进度推流（关 Chrome 计数、逐 Profile/作用域）；running 期间渲染进度条。 */
+  progress: { stage: string; profile?: string; scope?: string; detail?: string } | null;
+  profileIssues: Array<{ profile: string; error: string }> | null;
   onToggleScope: (scope: ImportScopeId) => void;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (allowElevated: boolean, scopes: Record<ImportScopeId, boolean>) => void;
+  onConfirm: (
+    allowElevated: boolean,
+    scopes: Record<ImportScopeId, boolean>,
+    options: { closeChromeFirst: boolean },
+  ) => void;
 }) {
   const { intl } = useZCodeIntl();
   const [allowElevated, setAllowElevated] = useState(true);
@@ -216,6 +225,73 @@ export function ChromeImportDialog({
             <span>{intl.formatMessage({ id: "settings.browser.import.adminConsent" })}</span>
           </label>
         ) : null}
+        {running && progress ? (
+          <div
+            data-import-progress="true"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="space-y-1.5 rounded-lg border border-border px-3 py-2 text-ui-sm"
+          >
+            <div className="flex items-center gap-2">
+              <LoaderCircle className="size-4 animate-spin text-foreground-subtle" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">
+                {intl.formatMessage(
+                  { id: "settings.browser.import.progressLine" },
+                  {
+                    stage: intl.formatMessage({
+                      id:
+                        progress.stage === "closing-chrome"
+                          ? "settings.browser.import.progress.closingChrome"
+                          : progress.stage === "profile-start"
+                            ? "settings.browser.import.progress.profile"
+                            : progress.stage === "profile-scope"
+                              ? `settings.browser.import.scope.${progress.scope ?? "cookies"}`
+                              : progress.stage === "history"
+                                ? "settings.browser.import.scope.history"
+                                : "settings.browser.import.progress.working",
+                    }),
+                    profile: progress.profile ?? "",
+                    detail: progress.detail ?? "",
+                  },
+                )}
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+              <div className="h-full w-1/3 animate-pulse rounded-full bg-brand" />
+            </div>
+          </div>
+        ) : null}
+        {!running && profileIssues && profileIssues.length > 0 ? (
+          <div
+            data-import-profile-errors="true"
+            className="space-y-1 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-ui-sm text-destructive"
+          >
+            {profileIssues.map((issue) => (
+              <div key={`${issue.profile}:${issue.error}`} className="flex items-start gap-2">
+                <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  {intl.formatMessage(
+                    { id: "settings.browser.import.profileError" },
+                    {
+                      profile: issue.profile,
+                      error: intl.formatMessage({
+                        id:
+                          issue.error === "chrome_profile_locked"
+                            ? "settings.browser.import.profileLocked"
+                            : issue.error === "chrome_executable_not_found"
+                              ? "settings.browser.import.executableNotFound"
+                              : issue.error === "chrome_cookie_access_denied"
+                                ? "settings.browser.import.accessDenied"
+                                : "settings.browser.import.failed",
+                      }),
+                    },
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={running}>
             {intl.formatMessage({ id: done ? "common.close" : "common.cancel" })}
@@ -225,7 +301,10 @@ export function ChromeImportDialog({
               disabled={running}
               onClick={(event) => {
                 event.preventDefault();
-                onConfirm(allowElevated, enabledScopes);
+                // chrome.exe 后台进程仍存活时，本轮确认先优雅关闭 Chrome
+                //（UAC 由随后的 App-Bound 解密 helper 触发）。
+                const closeChromeFirst = chromeProcessCount > 0;
+                onConfirm(allowElevated, enabledScopes, { closeChromeFirst });
               }}
             >
               {running ? (

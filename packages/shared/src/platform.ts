@@ -400,6 +400,28 @@ export interface ChromeBrowserDataImportOptions {
   allowElevatedChromeDecryption?: boolean;
   /** 对话框勾选的作用域；缺省全量。key: cookies/passwords/history/siteData。 */
   scopes?: Record<string, boolean>;
+  /**
+   * 用户在对话框里明确同意后，导入前先优雅退出后台存活的 chrome.exe
+   * （先 WM_CLOSE 再强杀残留，最后校验归零）；否则后台模式会一直锁着
+   * Cookie/密码库，造成「明明关了 Chrome 还是 EBUSY」。
+   */
+  closeChromeFirst?: boolean;
+}
+
+/** 导入过程中的实时进度；经 ChromeImportProgress 通道推给 renderer 进度条。 */
+export interface ChromeImportProgressUpdate {
+  stage:
+    | "closing-chrome"
+    | "discovering"
+    | "profile-start"
+    | "profile-scope"
+    | "history"
+    | "done"
+    | "error";
+  profile?: string;
+  scope?: "cookies" | "passwords" | "siteData" | "history";
+  /** 人类可读的瞬时细节（已关闭进程数、当前计数等）。 */
+  detail?: string;
 }
 
 /** Chrome 浏览器数据导入只返回数量和状态；Cookie/密码值和解密材料不得跨进程。 */
@@ -431,6 +453,8 @@ export interface ChromeBrowserDataImportResult {
   };
   /** 部分成功时保留可操作问题；不得包含 Profile 绝对路径或站点数据。 */
   issues?: ChromeBrowserDataImportError[];
+  /** 逐 Profile 的失败明细：进度条/对话框展示「哪个 Profile、什么错」。 */
+  profileIssues?: Array<{ profile: string; error: ChromeBrowserDataImportError }>;
   error?: ChromeBrowserDataImportError;
 }
 
@@ -1098,6 +1122,8 @@ export interface IPlatformService {
 
   /** chrome.exe 进程数（含后台进程）；Cookie/密码导入要求 Chrome 完全退出。 */
   getChromeProcessCount?(): Promise<{ count: number }>;
+  /** 订阅导入实时进度（关 Chrome、逐 Profile/作用域计数）；返回 disposer。 */
+  onChromeImportProgress?(callback: (update: ChromeImportProgressUpdate) => void): () => void;
   /** 清理内置浏览器持久化分区；cache 模式保留认证数据，all 模式清理全部站点数据。 */
   clearEmbeddedBrowserData?(mode: "cache" | "all"): Promise<EmbeddedBrowserDataClearResult>;
 

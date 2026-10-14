@@ -155,6 +155,8 @@ export function createDesktopPlatform(options: {
     captureWindowScreenshot: () =>
       window.zcode.captureWindowScreenshot?.() ?? Promise.resolve(null),
     onUpdateReady: (callback) => window.zcode.onUpdateReady(callback),
+    onChromeImportProgress: (callback) =>
+      window.zcode.onChromeImportProgress?.(callback) ?? (() => {}),
     onUpdateCheckResult: (callback) => window.zcode.onUpdateCheckResult(callback),
     onUpdateStateChanged: (callback) => window.zcode.onUpdateStateChanged?.(callback) ?? (() => {}),
     getUpdateState: () =>

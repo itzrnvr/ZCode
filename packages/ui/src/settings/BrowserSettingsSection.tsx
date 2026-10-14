@@ -121,6 +121,15 @@ export function BrowserSettingsSection({
   const [importRecord, setImportRecord] = useState<ChromeImportRecord | null>(() =>
     readChromeImportRecord(),
   );
+  const [importProgress, setImportProgress] = useState<{
+    stage: string;
+    profile?: string;
+    scope?: string;
+    detail?: string;
+  } | null>(null);
+  const [profileIssues, setProfileIssues] = useState<
+    Array<{ profile: string; error: string }> | null
+  >(null);
   const [chromeProcessCount, setChromeProcessCount] = useState(0);
   const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
   const nativeActionsAvailable =
@@ -154,12 +163,18 @@ export function BrowserSettingsSection({
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
+    const timer = window.setInterval(refresh, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
   }, [importDialogOpen, platform]);
+  // 导入进行中的实时进度：main 侧逐阶段推流（关 Chrome 计数、Profile/作用域计数）。
+  useEffect(() => {
+    const subscribe = platform.onChromeImportProgress;
+    if (typeof subscribe !== "function") return undefined;
+    return subscribe((update) => setImportProgress(update));
+  }, [platform]);
 
   const refreshAfterPluginChange = useCallback(async () => {
     await invalidateDeferredDraftSessionForSkillChange({
@@ -220,10 +235,15 @@ export function BrowserSettingsSection({
   );
 
   const handleImportConfirm = useCallback(
-    async (allowElevated: boolean, scopes: Record<ImportScopeId, boolean>) => {
+    async (
+      allowElevated: boolean,
+      scopes: Record<ImportScopeId, boolean>,
+      options: { closeChromeFirst: boolean },
+    ) => {
       if (!platform.importChromeBrowserData) return;
       setPendingOperation("import");
       setLastImportResult(null);
+      setProfileIssues(null);
       setImportLiveScopes([
         { id: "cookies", status: "running" },
         { id: "passwords", status: "pending" },
@@ -239,10 +259,12 @@ export function BrowserSettingsSection({
         const result = await platform.importChromeBrowserData({
           allowElevatedChromeDecryption: allowElevated,
           scopes,
+          closeChromeFirst: options.closeChromeFirst,
         });
         trace.complete({ resultSource: "platform_result" });
         setLastImportResult(result);
         setImportLiveScopes(null);
+        setProfileIssues(result.profileIssues ?? null);
         if (result.success) {
           setImportRecord(writeChromeImportRecord(result));
         }
@@ -257,6 +279,7 @@ export function BrowserSettingsSection({
         toast(intl.formatMessage({ id: "settings.browser.import.failed" }));
       } finally {
         setPendingOperation(null);
+        setImportProgress(null);
       }
     },
     [intl, platform],
@@ -518,6 +541,8 @@ export function BrowserSettingsSection({
         liveScopes={importLiveScopes}
         enabledScopes={enabledScopes}
         chromeProcessCount={chromeProcessCount}
+        progress={importProgress}
+        profileIssues={profileIssues}
         onToggleScope={(scope) =>
           setEnabledScopes((current) => ({ ...current, [scope]: !current[scope] }))
         }
@@ -526,7 +551,9 @@ export function BrowserSettingsSection({
           setImportDialogOpen(open);
           if (!open) setImportLiveScopes(null);
         }}
-        onConfirm={(allowElevated, scopes) => void handleImportConfirm(allowElevated, scopes)}
+        onConfirm={(allowElevated, scopes, confirmOptions) =>
+          void handleImportConfirm(allowElevated, scopes, confirmOptions)
+        }
       />
     </div>
   );

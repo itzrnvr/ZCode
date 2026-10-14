@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -5,6 +6,7 @@ import { session as electronSession } from "electron";
 import type {
   ChromeBrowserDataImportError,
   ChromeBrowserDataImportResult,
+  ChromeImportProgressUpdate,
   EmbeddedBrowserDataClearResult,
 } from "@zcode/shared";
 import {
@@ -107,6 +109,65 @@ export function resolveChromeDefaultProfilePath(
   return join(homeDir, ".config", "google-chrome", "Default");
 }
 
+/**
+ * 后台模式（「关闭 Google Chrome 后继续运行后台应用」）会让 chrome.exe 在所有
+ * 窗口关闭后继续存活，Cookie/密码 SQLite 库因此始终被锁。用户在对话框明确
+ * 同意后执行：先 taskkill（WM_CLOSE， Visible 窗口优雅退出），等若干秒；
+ * 残留（后台进程没有窗口可关）再 /F 强杀并轮询直到归零。同用户进程无需 UAC；
+ * UAC 由随后的 App-Bound 解密 helper 触发。
+ */
+async function countChromeProcessesWindows(): Promise<number> {
+  const stdout = await new Promise<string>((resolve) => {
+    execFile("tasklist", ["/FI", "IMAGENAME eq chrome.exe", "/FO", "CSV", "/NH"], (error, out) =>
+      resolve(error ? "" : String(out)),
+    );
+  });
+  return stdout.split("\n").filter((line) => line.trim().startsWith('"chrome.exe"')).length;
+}
+
+function taskkillChrome(force: boolean): Promise<void> {
+  return new Promise((resolve) => {
+    execFile(
+      "taskkill",
+      force ? ["/F", "/IM", "chrome.exe"] : ["/IM", "chrome.exe"],
+      () => resolve(),
+    );
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function closeRunningChromeProcesses(
+  onProgress: (update: ChromeImportProgressUpdate) => void,
+  logger: BrowserDataLogger,
+): Promise<void> {
+  if (process.platform !== "win32") return;
+  let count = await countChromeProcessesWindows();
+  if (count === 0) return;
+  onProgress({ stage: "closing-chrome", detail: String(count) });
+  await taskkillChrome(false);
+  for (let waited = 0; waited < 6000; waited += 500) {
+    await sleep(500);
+    count = await countChromeProcessesWindows();
+    if (count === 0) return;
+  }
+  onProgress({ stage: "closing-chrome", detail: String(count) });
+  await taskkillChrome(true);
+  for (let waited = 0; waited < 10000; waited += 500) {
+    await sleep(500);
+    count = await countChromeProcessesWindows();
+    if (count === 0) {
+      onProgress({ stage: "closing-chrome", detail: "0" });
+      return;
+    }
+  }
+  logger.warn("[browser-data] chrome.exe still running after forced termination", {
+    remaining: count,
+  });
+}
+
 function emptyImportResult(error?: ChromeBrowserDataImportError): ChromeBrowserDataImportResult {
   return {
     success: false,
@@ -134,6 +195,10 @@ export async function importChromeBrowserData(options: {
   targetProfileDir?: string;
   /** Dialog checkbox scopes; missing means all. */
   scopes?: Record<string, boolean>;
+  /** 用户同意后先优雅退出后台 chrome.exe；详见 shared ChromeBrowserDataImportOptions。 */
+  closeChromeFirst?: boolean;
+  /** 实时进度回调（IPC 侧转发给 renderer 进度条）。 */
+  onProgress?: (update: ChromeImportProgressUpdate) => void;
   windowsChromeAppBoundKeyReader?: WindowsChromeAppBoundKeyReader;
   localStorageImporter?: (options: {
     profilePath: string;
@@ -144,6 +209,10 @@ export async function importChromeBrowserData(options: {
   }) => Promise<ChromeLocalStorageImportStats>;
 }): Promise<ChromeBrowserDataImportResult> {
   const platform = options.platform ?? process.platform;
+  const onProgress = options.onProgress ?? (() => undefined);
+  if (options.closeChromeFirst) {
+    await closeRunningChromeProcesses(onProgress, options.logger);
+  }
   let detectedChromeExecutablePath = options.chromeExecutablePath;
   if (!detectedChromeExecutablePath) {
     // Resolve the executable on every platform, not just non-win32: the
@@ -165,6 +234,7 @@ export async function importChromeBrowserData(options: {
   // last-used/Default, which is regularly the WRONG profile (measured live:
   // Default empty, Profile 1 holds all cookies and passwords). "Import
   // everything" merges all importable profiles.
+  onProgress({ stage: "discovering" });
   const profiles: ImportProfileTarget[] = options.profilePath
     ? [
         {
@@ -209,6 +279,7 @@ export async function importChromeBrowserData(options: {
   const want = (scope: string): boolean => options.scopes?.[scope] !== false;
 
   for (const target of profiles) {
+    onProgress({ stage: "profile-start", profile: target.profileDirectory });
     options.logger.info("[browser-data] importing Chrome profile", {
       profile: target.profileDirectory,
     });
@@ -217,6 +288,7 @@ export async function importChromeBrowserData(options: {
     // THIS profile, never kill the whole run — that single throw used to fail
     // every stage including the ones that work with Chrome open.
     if (want("cookies")) {
+      onProgress({ stage: "profile-scope", profile: target.profileDirectory, scope: "cookies" });
       try {
         const cookieImport = await importChromeCookies({
           allowElevatedChromeDecryption: options.allowElevatedChromeDecryption,
@@ -241,6 +313,16 @@ export async function importChromeBrowserData(options: {
           ? "chrome_profile_locked"
           : "chrome_data_import_failed";
         issues.add(lockIssue);
+        (result.profileIssues ??= []).push({
+          profile: target.profileDirectory,
+          error: lockIssue,
+        });
+        onProgress({
+          stage: "error",
+          profile: target.profileDirectory,
+          scope: "cookies",
+          detail: lockIssue,
+        });
         options.logger.warn("[browser-data] cookie stage failed for profile", {
           code: toSafeBrowserDataError(error).code,
           profile: target.profileDirectory,
@@ -250,6 +332,7 @@ export async function importChromeBrowserData(options: {
 
     // Site data (LocalStorage).
     if (want("siteData")) {
+      onProgress({ stage: "profile-scope", profile: target.profileDirectory, scope: "siteData" });
       const localStorageImporter = options.localStorageImporter ?? importChromeLocalStorage;
       const stats = await localStorageImporter({
         profilePath: target.profilePath,
@@ -267,6 +350,7 @@ export async function importChromeBrowserData(options: {
 
     // Passwords. The stage itself never throws; it degrades to failed counts.
     if (want("passwords")) {
+      onProgress({ stage: "profile-scope", profile: target.profileDirectory, scope: "passwords" });
       const stats = await importChromePasswords({
         allowElevated: options.allowElevatedChromeDecryption === true,
         chromeExecutablePath: target.executablePath ?? chromeExecutablePath,
@@ -297,6 +381,7 @@ export async function importChromeBrowserData(options: {
     (left, right) => right.historyModifiedAt - left.historyModifiedAt,
   )[0];
   if (want("history") && options.targetProfileDir && historyProfile) {
+    onProgress({ stage: "history", profile: historyProfile.profileDirectory });
     options.logger.info("[browser-data] importing Chrome History/Bookmarks", {
       profile: historyProfile.profileDirectory,
     });
@@ -334,6 +419,7 @@ export async function importChromeBrowserData(options: {
     result.error ??= result.localStorage.error ?? "chrome_browser_data_import_unavailable";
   }
   if (issues.size > 0) result.issues = [...issues];
+  onProgress({ stage: "done" });
   options.logger.info("[browser-data] Chrome import finished", {
     profileCount: profiles.length,
     importedCookies: result.cookies.imported,

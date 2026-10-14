@@ -2886,12 +2886,17 @@ const enUS: Record<string, string> = {
   "settings.browser.import.title": "Import from Chrome",
   "settings.browser.import.lastImport":
     "Last import {date} — {cookies} cookies · {passwords} passwords · {origins} site origins already copied. Re-running merges again, it never duplicates.",
+  "settings.browser.import.progressLine": "{stage}",
+  "settings.browser.import.progress.closingChrome": "Closing Chrome background processes ({detail} remaining)…",
+  "settings.browser.import.progress.profile": "Importing profile {profile}",
+  "settings.browser.import.progress.working": "Working…",
+  "settings.browser.import.profileError": "{profile}: {error}",
   "settings.browser.import.action": "Import everything from Chrome",
   "settings.browser.import.dialogTitle": "Import everything from Chrome?",
   "settings.browser.import.dialogDescription":
     "Blackbird copies sign-in state from your Chrome profile into its built-in browser. Passwords are decrypted on this machine only and never uploaded.",
   "settings.browser.import.chromeRunning":
-    "Chrome is still running ({count} background processes). Fully exit Chrome (tray icon → Exit, or Task Manager) before importing — cookies and passwords stay locked while it runs.",
+    "Chrome is still running in the background ({count} processes) and keeps the cookie/password databases locked. Confirm below and Blackbird will close Chrome's background processes for you, then import (a UAC prompt follows for the secure decrypt step).",
   "settings.browser.import.dialogConfirm": "Start import",
   "settings.browser.import.scope.cookies": "Cookies",
   "settings.browser.import.scope.cookies.hint": "Sign-in sessions copied as-is",

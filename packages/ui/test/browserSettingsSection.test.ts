@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const localStorageState = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -52,6 +52,8 @@ const h = vi.hoisted(() => {
     initialize,
     pluginState,
     setEnabled,
+    chromeProcessCount: 0,
+    progressHandler: null as ((update: unknown) => void) | null,
   };
 });
 
@@ -59,6 +61,13 @@ vi.mock("@/hooks/usePlatform.js", () => ({
   usePlatform: () => ({
     importChromeBrowserData: h.importChromeBrowserData,
     clearEmbeddedBrowserData: h.clearEmbeddedBrowserData,
+    getChromeProcessCount: () => Promise.resolve({ count: h.chromeProcessCount }),
+    onChromeImportProgress: (callback: (update: unknown) => void) => {
+      h.progressHandler = callback;
+      return () => {
+        h.progressHandler = null;
+      };
+    },
   }),
 }));
 vi.mock("@/hooks/useServices.js", () => ({
@@ -267,7 +276,7 @@ describe("BrowserSettingsSection", () => {
 
     await waitFor(() => {
       expect(h.importChromeBrowserData).toHaveBeenCalledWith(
-        expect.objectContaining({ allowElevatedChromeDecryption: true }),
+        expect.objectContaining({ allowElevatedChromeDecryption: true, closeChromeFirst: false }),
       );
     });
     expect(await screen.findByRole("button", { name: "common.close" })).toBeTruthy();
@@ -388,6 +397,47 @@ describe("BrowserSettingsSection", () => {
       localStorage.getItem("zcode.chromeImport.lastResult.v1") ?? "{}",
     );
     expect(stored.cookies).toBe(3);
+  });
+
+  it("后台 Chrome 存活时确认会先请求关闭（closeChromeFirst: true）", async () => {
+    h.chromeProcessCount = 57;
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    // 进程计数是异步轮询回来的；等警告出现再确认。
+    await screen.findByText(/settings\.browser\.import\.chromeRunning/);
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
+
+    await waitFor(() => {
+      expect(h.importChromeBrowserData).toHaveBeenCalledWith(
+        expect.objectContaining({ closeChromeFirst: true }),
+      );
+    });
+    h.chromeProcessCount = 0;
+  });
+
+  it("导入进行中渲染实时进度条并响应 main 推流", async () => {
+    // 让导入挂起，进度条才有渲染窗口。
+    const deferred = Promise.withResolvers<void>();
+    h.importChromeBrowserData.mockImplementationOnce(
+      () => deferred.promise as unknown as Promise<unknown>,
+    );
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
+
+    await waitFor(() => {
+      expect(h.progressHandler).not.toBeNull();
+    });
+    await act(async () => {
+      h.progressHandler?.({ stage: "closing-chrome", detail: "57" });
+    });
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("data-import-progress")).toBe("true");
+    expect(bar.textContent).toContain("57");
+    deferred.resolve();
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar")).toBeNull();
+    });
   });
 
   it("Web/手机端禁用本机浏览器数据操作并展示桌面端提示", () => {
