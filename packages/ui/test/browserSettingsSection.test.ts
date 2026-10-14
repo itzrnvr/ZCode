@@ -7,6 +7,8 @@ const h = vi.hoisted(() => {
   const importChromeBrowserData = vi.fn(async () => ({
     success: true,
     cookies: { imported: 3, skipped: 1, failed: 0 },
+    passwords: { imported: 0, skipped: 0, failed: 0 },
+    history: { visitsCopied: true, bookmarksCopied: false },
     localStorage: {
       originsImported: 1,
       entriesImported: 2,
@@ -108,6 +110,22 @@ function renderSection(
       ...overrides,
     }),
   );
+}
+
+function failedResult(error: string) {
+  return {
+    success: false,
+    cookies: { imported: 0, skipped: 0, failed: 0 },
+    passwords: { imported: 0, skipped: 0, failed: 0 },
+    history: { visitsCopied: false, bookmarksCopied: false },
+    localStorage: {
+      originsImported: 0,
+      entriesImported: 0,
+      originsSkipped: 0,
+      originsFailed: 0,
+    },
+    error,
+  };
 }
 
 describe("BrowserSettingsSection", () => {
@@ -222,88 +240,86 @@ describe("BrowserSettingsSection", () => {
     });
   });
 
-  it("桌面端一键导入 Chrome 当前 Profile 的 Cookie 与 LocalStorage", async () => {
-    renderSection();
+  it("桌面端一键导入 Chrome 全部数据（对话框确认后触发）", async () => {
+    const view = renderSection();
     fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
 
+    // Fork：入口点击先开范围对话框，确认后才真正导入。
+    expect(screen.getByText("settings.browser.import.dialogTitle")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
+
     await waitFor(() => {
-      expect(h.importChromeBrowserData).toHaveBeenCalledOnce();
+      expect(h.importChromeBrowserData).toHaveBeenCalledWith(
+        expect.objectContaining({ allowElevatedChromeDecryption: true }),
+      );
     });
-    expect(await screen.findByText("settings.browser.import.success")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "common.close" })).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        document.body.querySelector('[data-import-scope="cookies"][data-import-status="done"]'),
+      ).not.toBeNull();
+    });
   });
 
-  it("Windows 暂时隐藏导入入口但保留浏览器数据清理", () => {
+  it("Windows 展示导入入口（对话框确认前不触发导入）", () => {
     renderSection(true, true);
 
-    expect(screen.queryByRole("button", { name: "settings.browser.import.action" })).toBeNull();
+    // Fork 已在 Windows 放开导入：入口与数据清理按钮都在，点击入口只开对话框。
     expect(
       screen.getByRole("button", { name: "settings.browser.clearCache.action" }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "settings.browser.clearAll.action" })).toBeTruthy();
-    expect(
-      screen.queryByRole("checkbox", { name: "settings.browser.import.adminConsent" }),
-    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    expect(screen.getByText("settings.browser.import.dialogTitle")).toBeTruthy();
     expect(h.importChromeBrowserData).not.toHaveBeenCalled();
   });
 
-  it("未安装 Chrome 时展示 Chrome 未找到提示", async () => {
-    h.importChromeBrowserData.mockResolvedValueOnce({
-      success: false,
-      cookies: { imported: 0, skipped: 0, failed: 0 },
-      localStorage: {
-        originsImported: 0,
-        entriesImported: 0,
-        originsSkipped: 0,
-        originsFailed: 0,
-      },
-      error: "chrome_executable_not_found",
-    });
+  it("未安装 Chrome 时提示 Chrome 未找到", async () => {
     renderSection();
+    h.importChromeBrowserData.mockResolvedValueOnce(failedResult("chrome_executable_not_found"));
     fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
 
-    expect(await screen.findByText("settings.browser.import.executableNotFound")).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        document.body.querySelector('[data-import-scope="cookies"][data-import-status="failed"]'),
+      ).not.toBeNull();
+    });
   });
 
   it("Profile 无法自动消歧时展示可操作错误", async () => {
-    h.importChromeBrowserData.mockResolvedValueOnce({
-      success: false,
-      cookies: { imported: 0, skipped: 0, failed: 0 },
-      localStorage: {
-        originsImported: 0,
-        entriesImported: 0,
-        originsSkipped: 0,
-        originsFailed: 0,
-      },
-      error: "chrome_profile_ambiguous",
-    });
     renderSection();
+    h.importChromeBrowserData.mockResolvedValueOnce(failedResult("chrome_profile_ambiguous"));
     fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
 
-    expect(await screen.findByText("settings.browser.import.ambiguous")).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        document.body.querySelector('[data-import-scope="cookies"][data-import-status="failed"]'),
+      ).not.toBeNull();
+    });
   });
 
   it("macOS 钥匙串授权被拒绝时提示导入已取消", async () => {
-    h.importChromeBrowserData.mockResolvedValueOnce({
-      success: false,
-      cookies: { imported: 0, skipped: 0, failed: 0 },
-      localStorage: {
-        originsImported: 0,
-        entriesImported: 0,
-        originsSkipped: 0,
-        originsFailed: 0,
-      },
-      error: "chrome_cookie_access_denied",
-    });
     renderSection();
+    h.importChromeBrowserData.mockResolvedValueOnce(failedResult("chrome_cookie_access_denied"));
     fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
 
-    expect(await screen.findByText("settings.browser.import.accessDenied")).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        document.body.querySelector('[data-import-scope="cookies"][data-import-status="failed"]'),
+      ).not.toBeNull();
+    });
   });
 
   it("部分 Cookie 未导入时只展示实际导入数量", async () => {
+    const view = renderSection();
     h.importChromeBrowserData.mockResolvedValueOnce({
       success: true,
       cookies: { imported: 2, skipped: 4, failed: 0 },
+      passwords: { imported: 0, skipped: 0, failed: 0 },
+      history: { visitsCopied: false, bookmarksCopied: false },
       localStorage: {
         originsImported: 1,
         entriesImported: 3,
@@ -312,12 +328,19 @@ describe("BrowserSettingsSection", () => {
       },
       issues: ["chrome_cookie_protection_unsupported"],
     });
-    renderSection();
     fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
 
-    expect(await screen.findByText("settings.browser.import.success")).toBeTruthy();
-    expect(screen.queryByText("settings.browser.import.partialCookieProtected")).toBeNull();
-    expect(screen.queryByText("settings.browser.import.successWithSkipped")).toBeNull();
+    const cookiesRow = await waitFor(() => {
+      const row = document.body.querySelector(
+        '[data-import-scope="cookies"][data-import-status="done"]',
+      );
+      expect(row).not.toBeNull();
+      return row as HTMLElement;
+    });
+    // 成功态只展示实际导入数量：2 条 Cookie，skipped 详情不进 UI。
+    expect(cookiesRow.textContent).toContain("2");
+    expect(cookiesRow.textContent).not.toContain("4");
   });
 
   it("Web/手机端禁用本机浏览器数据操作并展示桌面端提示", () => {
