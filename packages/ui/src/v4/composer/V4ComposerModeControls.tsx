@@ -120,7 +120,7 @@ function V4ComposerModeSwitchImpl({
               aria-label={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
               className={cn(
                 "group/mode h-7 gap-1 rounded-lg px-2 text-ui-base data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0",
-                selected.id === "yolo" && "text-warning hover:text-warning",
+                selected.id === "yolo" && "text-brand hover:text-brand aria-expanded:text-brand",
                 selected.id === "guarded" &&
                   "text-icon-blue hover:text-icon-blue aria-expanded:text-icon-blue",
               )}
