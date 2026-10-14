@@ -8,7 +8,7 @@ import type {
   WebContents,
   WindowOpenHandlerResponse,
 } from "electron";
-import type { DesktopTitleBarTheme, Locale } from "@zcode/shared";
+import { ZCODE_PRODUCT_FLAVOR, type DesktopTitleBarTheme, type Locale } from "@zcode/shared";
 import {
   DEFAULT_LOCALE,
   desktopMenuMessageIds,
@@ -18,6 +18,7 @@ import {
   PlatformChannels,
 } from "@zcode/shared";
 import { loadWindow, type WindowBootstrapOptions } from "./desktopHostProcess.js";
+import { setDesktopTrayRuntimeIcon } from "./desktopTray.js";
 import {
   buildWindowsTitleBarOverlayForZoomLevel,
   hasCustomWindowsControls,
@@ -557,6 +558,65 @@ function buildTextContextMenuTemplate(
   return [];
 }
 
+/**
+ * Fork: 用 renderer 光栅化的强调色版 B 徽标替换窗口/托盘图标。
+ * 任务栏图标是编译期 ICO，CSS 变量够不到；让 renderer 在画布上按 18×18 网格
+ * 重绘（几何与 logo-blackbird.svg 一致），main 拿 PNG dataURL 换 setIcon。
+ * 只在存在合法 accent 覆盖时执行，失败静默（保留品牌橙图标）。
+ */
+async function applyAccentRuntimeIcons(
+  win: BrowserWindow,
+  logger: { warn: (...args: unknown[]) => void },
+): Promise<void> {
+  try {
+    const dataUrl = (await win.webContents.executeJavaScript(`(() => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("zcode-ui-colors") || "{}");
+        const accent = parsed && parsed.accent;
+        if (!accent || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(accent))) return null;
+        const canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.scale(256 / 18, 256 / 18);
+        const r = (x, y, w, h, rad, fill) => {
+          ctx.beginPath();
+          ctx.roundRect(x, y, w, h, rad);
+          ctx.fillStyle = fill;
+          ctx.fill();
+        };
+        r(0, 0, 18, 18, 4, "#0A0A0E");
+        ctx.save();
+        ctx.translate(3.4, 2.2);
+        ctx.scale(0.046875, 0.046875);
+        r(78, 14, 100, 190, 18, String(accent));
+        r(78, 14, 100, 92, 18, String(accent));
+        r(78, 112, 108, 92, 20, String(accent));
+        r(106, 34, 44, 52, 10, "#0A0A0E");
+        r(106, 132, 52, 52, 12, "#0A0A0E");
+        ctx.beginPath();
+        ctx.arc(162, 62, 7, 0, Math.PI * 2);
+        ctx.fillStyle = "#0A0A0E";
+        ctx.fill();
+        ctx.restore();
+        return canvas.toDataURL("image/png");
+      } catch {
+        return null;
+      }
+    })()`)) as string | null;
+    if (!dataUrl) return;
+    const image = nativeImage.createFromDataURL(dataUrl);
+    if (image.isEmpty()) return;
+    if (process.platform === "win32" || process.platform === "linux") {
+      win.setIcon(image);
+    }
+    setDesktopTrayRuntimeIcon(image);
+  } catch (error) {
+    logger.warn("[desktop-window] accent runtime icon failed", error);
+  }
+}
+
 export function createBrowserWindow(options: {
   iconPath: string;
   preloadPath: string;
@@ -645,6 +705,9 @@ export function createBrowserWindow(options: {
     win.webContents.setZoomFactor(initialDesktopZoomFactor);
     syncWindowControlsOverlayForZoomLevel(win, initialDesktopZoomLevel);
     syncWindowFullscreenState(win);
+    if (ZCODE_PRODUCT_FLAVOR === "blackbird") {
+      void applyAccentRuntimeIcons(win, options.logger);
+    }
   });
   win.webContents.on(
     "did-fail-load",

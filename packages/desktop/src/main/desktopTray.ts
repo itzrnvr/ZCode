@@ -1,4 +1,4 @@
-import { Menu, Tray } from "electron";
+import { Menu, NativeImage, Tray } from "electron";
 import { resolveIconPath } from "./forkIconPath.js";
 import {
   DesktopCommandIds,
@@ -11,7 +11,14 @@ import {
 
 let desktopTray: Tray | null = null;
 let rebuildDesktopTrayContextMenu: (() => void) | null = null;
+// Accent-colored runtime icon; window boot may rasterize it before or after the
+// tray exists, so stash it and apply at the earliest of the two moments.
+let pendingAccentTrayIcon: NativeImage | null = null;
 
+export function setDesktopTrayRuntimeIcon(image: NativeImage): void {
+  pendingAccentTrayIcon = image;
+  desktopTray?.setImage(image);
+}
 export function resolveDesktopTrayIconPath(platform: NodeJS.Platform = process.platform) {
   if (platform === "linux") return resolveIconPath("icon.png");
   // Windows 打包态用独立托盘 .ico 避免高 DPI 模糊；开发态回退 icon.ico。
@@ -39,6 +46,7 @@ export function createDesktopTray(options: {
 
   try {
     desktopTray = new Tray(resolveDesktopTrayIconPath(platform));
+    if (pendingAccentTrayIcon) desktopTray.setImage(pendingAccentTrayIcon);
   } catch (error) {
     options.logger.warn("[desktop-tray] failed to create tray icon", error);
     return null;
