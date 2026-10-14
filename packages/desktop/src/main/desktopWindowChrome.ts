@@ -617,7 +617,10 @@ async function applyAccentRuntimeIcons(
       void updatePinnedTaskbarIcon(image, options.logger);
     }
   } catch (error) {
-    logger.warn("[desktop-window] accent runtime icon failed", error);
+    logger.warn(
+      "[desktop-window] accent runtime icon failed",
+      error instanceof Error ? error.stack : String(error),
+    );
   }
 }
 
@@ -702,7 +705,7 @@ export function createBrowserWindow(options: {
     | { kind: "pluginSandbox"; sandboxId: string }
   > = [];
 
-  win.webContents.once("did-finish-load", () => {
+  win.webContents.on("did-finish-load", () => {
     // 生产包使用 loadFile(file://...) 导航时，Chromium 可能在页面加载完成后重放
     // origin 级 zoom 状态，把窗口创建阶段设置的持久化缩放覆盖回默认值。
     // did-finish-load 后再按 setting.json 的档位重放一次，确保生产包和开发态 localhost 行为一致。
