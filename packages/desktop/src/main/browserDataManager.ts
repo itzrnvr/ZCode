@@ -80,6 +80,8 @@ function pathExists(path: string): Promise<boolean> {
 function isProfileLockError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | null)?.code;
   return code === "EBUSY" || code === "EACCES" || code === "EPERM" || code === "ERR_SQLITE_ERROR";
+}
+
 /** 兼容旧调用；实际导入使用 discoverChromeProfile 自动选择最近使用的 Profile。 */
 export function resolveChromeDefaultProfilePath(
   options: {

@@ -19,6 +19,15 @@
       "rules": {
         "max-lines": "off"
       }
+    },
+    {
+      // realChromeRelayBackend 是 PARKED 的整模块（host/index.ts 顶部注释）：客户端/后端
+      // 类完整保留以便重启接线，无人调用。拆分一个死模块只会把 park 状态打散，
+      // 行数上限对其没有维护价值，恢复接线时再重新收敛。
+      "files": ["**/host/realChromeRelayBackend.ts"],
+      "rules": {
+        "max-lines": "off"
+      }
     }
   ],
   "settings": {
