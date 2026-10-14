@@ -614,7 +614,7 @@ async function applyAccentRuntimeIcons(
     }
     setDesktopTrayRuntimeIcon(image);
     if (process.platform === "win32") {
-      void updatePinnedTaskbarIcon(image, options.logger);
+      void updatePinnedTaskbarIcon(image, logger);
     }
   } catch (error) {
     logger.warn(
