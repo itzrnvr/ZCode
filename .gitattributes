@@ -2,6 +2,10 @@
 *.mjs text eol=lf
 *.sh  text eol=lf
 
+# Gen UI 离线 vendor 快照按字节校验 sha256（gen-ui-runtime-assets.mjs）；
+# autocrlf 的 LF→CRLF smudge 会改变哈希，使 Windows 构建必然失败。按二进制保存。
+apps/zcode-cli/packages/visualize-plugin/skills/visualize/assets/vendor/** -text
+
 # E2E PDF fixture 含规范 xref 尾空格，必须按二进制处理，避免 diff --check 误报。
 packages/desktop/test/e2e/fixtures/fs/**/*.pdf binary
 

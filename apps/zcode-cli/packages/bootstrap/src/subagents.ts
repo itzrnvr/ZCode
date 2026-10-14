@@ -277,21 +277,6 @@ function normalizeBuiltInSelectionOverrides(
   return result;
 }
 
-function isDisabledUserProfile(
-  profile: AgentProfile,
-  disabledAgentIds: ReadonlySet<string>,
-): boolean {
-  if (profile.source !== "user") {
-    return false;
-  }
-  return disabledAgentIds.has(
-    createAgentStateId({
-      name: profile.name,
-      scope: "user",
-      source: "user",
-    }),
-  );
-}
 
 /**
  * 依赖目录与构建产物里不会有 agent profile 的 Markdown；用户 agent 根下经常

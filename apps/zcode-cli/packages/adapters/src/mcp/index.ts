@@ -799,16 +799,6 @@ class NodeMcpAdapter implements McpPort {
       );
     }
 
-    const record = this.records.get(request.serverName);
-    if (!record?.client || record.status.status !== "connected") {
-      // #4：调用点状态报错——server 未就绪/失败时报“什么状态、能不能等”，
-      // 而不是裸失败。调用方（模型）据此决定等待、换路或如实告知用户。
-      throw new Error(
-        `MCP server '${request.serverName}' is ${describeMcpServerReadiness(record?.status.status)}; ` +
-          `the server is still starting, is disabled, or has failed — do not retry immediately, ` +
-          `report the status if the task depends on it.`,
-      );
-    }
     try {
       return await this.callToolOnClient(
         record.client,

@@ -320,7 +320,6 @@ async function retryTurn(
     resolution.editTarget.intent.text,
     attachmentRefs,
     attachments,
-    payload.modelSelection,
   );
   return undefined;
 }

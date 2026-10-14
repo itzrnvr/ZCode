@@ -83,4 +83,3 @@ export type {
   SourceSignature,
   VacuumIntoRunner,
 } from "./session-store/database-backups.js";
-export type { AsyncSqliteMigrationOptions, SqliteMigrationProgress } from "./session-store/migration-runner.js";
