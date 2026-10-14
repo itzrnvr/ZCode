@@ -157,6 +157,8 @@ export function createDesktopPlatform(options: {
     onUpdateReady: (callback) => window.zcode.onUpdateReady(callback),
     onChromeImportProgress: (callback) =>
       window.zcode.onChromeImportProgress?.(callback) ?? (() => {}),
+    getChromeProcessCount: () =>
+      window.zcode.getChromeProcessCount?.() ?? Promise.resolve({ count: 0 }),
     onUpdateCheckResult: (callback) => window.zcode.onUpdateCheckResult(callback),
     onUpdateStateChanged: (callback) => window.zcode.onUpdateStateChanged?.(callback) ?? (() => {}),
     getUpdateState: () =>
