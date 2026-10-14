@@ -3,8 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Blackbird</title>
-    <style>
+    <script>
+      // Fork: 启动壳在 React/CSS 变量体系就绪前渲染；同步读一次本地持久化的
+ // Appearance → Accent 覆盖（zcode-ui-colors.accent，与 lib/uiColors.ts 同一约定），
+      // 命中就把启动 logo 颜色换成用户强调色，未设置保持品牌橙。
+      try {
+        var parsed = JSON.parse(localStorage.getItem("zcode-ui-colors") || "{}");
+        var accent = parsed && parsed.accent;
+        if (accent && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(accent))) {
+          document.documentElement.style.setProperty("--startup-accent", String(accent));
+        }
+      } catch (_) {}
+    </script>
       html,
       body,
       #root {
@@ -119,7 +129,7 @@
           viewBox="0 0 256 218"
           class="startup-logo"
           aria-hidden="true"
-          style="color: #F5AE4D"
+          style="color: var(--startup-accent, #F5AE4D)"
         >
           <rect x="78" y="14" width="100" height="190" rx="18" fill="currentColor" />
           <rect x="78" y="14" width="100" height="92" rx="18" fill="currentColor" />
