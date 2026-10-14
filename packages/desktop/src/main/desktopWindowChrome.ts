@@ -19,6 +19,7 @@ import {
 } from "@zcode/shared";
 import { loadWindow, type WindowBootstrapOptions } from "./desktopHostProcess.js";
 import { setDesktopTrayRuntimeIcon } from "./desktopTray.js";
+import { updatePinnedTaskbarIcon } from "./accentTaskbarIcon.js";
 import {
   buildWindowsTitleBarOverlayForZoomLevel,
   hasCustomWindowsControls,
@@ -612,6 +613,9 @@ async function applyAccentRuntimeIcons(
       win.setIcon(image);
     }
     setDesktopTrayRuntimeIcon(image);
+    if (process.platform === "win32") {
+      void updatePinnedTaskbarIcon(image, options.logger);
+    }
   } catch (error) {
     logger.warn("[desktop-window] accent runtime icon failed", error);
   }
