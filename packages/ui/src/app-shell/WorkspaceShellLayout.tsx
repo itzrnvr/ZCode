@@ -2381,7 +2381,7 @@ export const WorkspaceShellLayout = memo(
               }
               ref={sidebarContainerRef}
               className={cn(
-                "h-full overflow-hidden select-none",
+                "h-full overflow-hidden select-none bg-sidebar",
                 isWebRemoteControlShell && "max-md:min-h-0 max-md:flex-1",
                 !renderWebRemoteNavigationPanel && "max-md:hidden",
               )}

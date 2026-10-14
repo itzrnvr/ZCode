@@ -2716,6 +2716,8 @@ const zhCN: Record<string, string> = {
   "settings.browser.import.description":
     "把 Chrome 的 Cookie、保存的密码、历史、书签和站点数据一次性搬进内置浏览器——以后再也不用重新登录。密码只在本机解密，不会离开这台电脑。",
   "settings.browser.import.title": "从 Chrome 导入",
+  "settings.browser.import.lastImport":
+    "上次导入 {date} — 已复制 {cookies} 条 Cookie · {passwords} 个密码 · {origins} 个站点。重复导入按合并处理，不会产生重复数据。",
   "settings.browser.import.action": "从 Chrome 导入全部数据",
   "settings.browser.import.dialogTitle": "从 Chrome 导入全部数据？",
   "settings.browser.import.dialogDescription":

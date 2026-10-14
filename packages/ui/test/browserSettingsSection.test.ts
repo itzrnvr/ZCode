@@ -3,6 +3,17 @@ import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+const localStorageState = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (key: string) => localStorageState.get(key) ?? null,
+    setItem: (key: string, value: string) => localStorageState.set(key, value),
+    removeItem: (key: string) => localStorageState.delete(key),
+    clear: () => localStorageState.clear(),
+  },
+});
+
 const h = vi.hoisted(() => {
   const importChromeBrowserData = vi.fn(async () => ({
     success: true,
@@ -62,7 +73,13 @@ vi.mock("@/hooks/useZCodeSessionService.js", () => ({
 vi.mock("@/i18n/IntlProvider.js", () => ({
   useZCodeIntl: () => ({
     intl: {
-      formatMessage: ({ id }: { id: string }) => id,
+      formatMessage: (
+        { id }: { id: string },
+        values?: Record<string, unknown>,
+      ) =>
+        values && Object.keys(values).length > 0
+          ? `${id}:${JSON.stringify(values)}`
+          : id,
     },
   }),
 }));
@@ -341,6 +358,36 @@ describe("BrowserSettingsSection", () => {
     // 成功态只展示实际导入数量：2 条 Cookie，skipped 详情不进 UI。
     expect(cookiesRow.textContent).toContain("2");
     expect(cookiesRow.textContent).not.toContain("4");
+  });
+
+  it("已导入过的机器展示上次导入记录，避免重复导入的困惑", () => {
+    localStorage.setItem(
+      "zcode.chromeImport.lastResult.v1",
+      JSON.stringify({ at: 1760000000000, cookies: 2187, passwords: 2, origins: 92, entries: 1877 }),
+    );
+    renderSection();
+
+    const indicator = screen.getByTestId("chrome-import-last");
+    expect(indicator.textContent).toContain("2187");
+    expect(indicator.textContent).toContain("92");
+  });
+
+  it("导入成功后写入持久记录并立即展示", async () => {
+    localStorage.removeItem("zcode.chromeImport.lastResult.v1");
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.action" }));
+    fireEvent.click(screen.getByRole("button", { name: "settings.browser.import.dialogConfirm" }));
+
+    const indicator = await waitFor(() => {
+ const el = screen.getByTestId("chrome-import-last");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(indicator.textContent).toContain("3");
+    const stored = JSON.parse(
+      localStorage.getItem("zcode.chromeImport.lastResult.v1") ?? "{}",
+    );
+    expect(stored.cookies).toBe(3);
   });
 
   it("Web/手机端禁用本机浏览器数据操作并展示桌面端提示", () => {

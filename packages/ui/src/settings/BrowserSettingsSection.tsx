@@ -24,6 +24,11 @@ import { logger } from "@/logger.js";
 import { startUserAction } from "@/lib/userActionTelemetry.js";
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
 import { ChromeImportDialog, type ImportScopeId, type ImportScopeState } from "@/settings/ChromeImportDialog.js";
+import {
+  readChromeImportRecord,
+  writeChromeImportRecord,
+  type ChromeImportRecord,
+} from "@/settings/chromeImportHistory.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { useSkillStore } from "@/store/skillStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
@@ -113,6 +118,9 @@ export function BrowserSettingsSection({
     history: true,
     siteData: true,
   });
+  const [importRecord, setImportRecord] = useState<ChromeImportRecord | null>(() =>
+    readChromeImportRecord(),
+  );
   const [chromeProcessCount, setChromeProcessCount] = useState(0);
   const normalizedWorkspaceIdentity = workspaceIdentity?.trim() || null;
   const nativeActionsAvailable =
@@ -235,6 +243,9 @@ export function BrowserSettingsSection({
         trace.complete({ resultSource: "platform_result" });
         setLastImportResult(result);
         setImportLiveScopes(null);
+        if (result.success) {
+          setImportRecord(writeChromeImportRecord(result));
+        }
         toast(formatImportSummary(result, intl.formatMessage), {
           durationMs: 5000,
         });
@@ -340,11 +351,26 @@ export function BrowserSettingsSection({
               </BrowserOperationButton>
             }
             detail={
-              lastImportResult ? (
-                <div className="text-ui-base text-foreground-subtle">
-                  {formatImportSummary(lastImportResult, intl.formatMessage)}
-                </div>
-              ) : undefined
+              <div className="space-y-1">
+                {importRecord ? (
+                  <div className="text-ui-base text-foreground-subtle" data-testid="chrome-import-last">
+                    {intl.formatMessage(
+                      { id: "settings.browser.import.lastImport" },
+                      {
+                        date: new Date(importRecord.at).toLocaleString(),
+                        cookies: importRecord.cookies,
+                        passwords: importRecord.passwords,
+                        origins: importRecord.origins,
+                      },
+                    )}
+                  </div>
+                ) : null}
+                {lastImportResult ? (
+                  <div className="text-ui-base text-foreground-subtle">
+                    {formatImportSummary(lastImportResult, intl.formatMessage)}
+                  </div>
+                ) : null}
+              </div>
             }
           />
         </SettingsGroupCard>

@@ -2884,6 +2884,8 @@ const enUS: Record<string, string> = {
   "settings.browser.import.description":
     "Pull cookies, saved passwords, history, bookmarks and site data from your Chrome into the built-in browser once — no relogin, ever. Passwords are decrypted locally on this machine and never leave it.",
   "settings.browser.import.title": "Import from Chrome",
+  "settings.browser.import.lastImport":
+    "Last import {date} — {cookies} cookies · {passwords} passwords · {origins} site origins already copied. Re-running merges again, it never duplicates.",
   "settings.browser.import.action": "Import everything from Chrome",
   "settings.browser.import.dialogTitle": "Import everything from Chrome?",
   "settings.browser.import.dialogDescription":
