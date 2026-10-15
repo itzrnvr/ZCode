@@ -114,12 +114,14 @@ export async function dismissOnboarding(win) {
  * Open a session by its sidebar row testid, retrying until the timeline mounts.
  * Returns the mounted state ({units, vhH}).
  */
-export async function openSession(win, sessionId, { attempts = 5, timeoutMs = 90_000 } = {}) {
+export async function openSession(win, sessionId, { attempts = 6, timeoutMs = 120_000 } = {}) {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const row = win.locator(`[data-testid="task-item-${sessionId}"]`);
     if (await row.count()) {
       await row.first().scrollIntoViewIfNeeded().catch(() => {});
-      await row.first().click({ force: true, timeout: 10_000 }).catch(() => {});
+      await win.waitForTimeout(150);
+      await row.first().hover({ timeout: 5_000 }).catch(() => {});
+      await row.first().click({ timeout: 8_000 }).catch(() => {});
     }
     const deadline = Date.now() + timeoutMs / attempts;
     for (;;) {
@@ -129,10 +131,52 @@ export async function openSession(win, sessionId, { attempts = 5, timeoutMs = 90
           document.querySelector("[data-v4-timeline-virtual-history]")?.getBoundingClientRect().height ?? 0,
         ),
       }));
-      if (state.units > 0) return state;
+      if (state.units > 0) {
+        // let the initial hydration settle before anyone measures on top of it
+        await waitQuiet(win, { quietMs: 2000, maxWaitMs: 30_000 });
+        return state;
+      }
       if (Date.now() > deadline) break;
       await win.waitForTimeout(1500);
     }
   }
-  return { units: 0, vhH: 0 };
+  throw new Error(`openSession: timeline for ${sessionId} never mounted`);
+}
+
+/** Wait until no LoAF >=50ms has been observed for `quietMs` (bounded by maxWaitMs). */
+export async function waitQuiet(win, { quietMs = 2000, maxWaitMs = 30_000 } = {}) {
+  await win.evaluate(() => {
+    window.__quiet = { last: performance.now() };
+    window.__quietObs?.disconnect?.();
+    const obs = new PerformanceObserver((l) => {
+      for (const e of l.getEntries()) {
+        if (e.duration >= 50) window.__quiet.last = performance.now();
+      }
+    });
+    obs.observe({ type: "long-animation-frame", durationThreshold: 50 });
+    window.__quietObs = obs;
+  });
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const sinceBusy = await win.evaluate(() => Math.round(performance.now() - window.__quiet.last));
+    if (sinceBusy >= quietMs || Date.now() > deadline) break;
+    await win.waitForTimeout(400);
+  }
+}
+
+/** rAF health probe: average frame interval over 30 frames (ms). */
+export async function frameHealth(win) {
+  return await win.evaluate(
+    () =>
+      new Promise((resolve) => {
+        let n = 0;
+        const t0 = performance.now();
+        const tick = () => {
+          n++;
+          if (n < 30) requestAnimationFrame(tick);
+          else resolve(Math.round(((performance.now() - t0) / 30) * 10) / 10);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
 }

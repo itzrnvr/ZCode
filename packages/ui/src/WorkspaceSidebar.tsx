@@ -252,17 +252,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   reconnectingRemoteWorkspaceLogsByWorkspaceKey = EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY,
   isDesktop = false,
   isWebRemoteControl = false,
-  isMacDesktop: _isMacDesktop = false,
   isWindowsDesktop = false,
-  isSidebarVisible: _isSidebarVisible = true,
-  onToggleSidebar: _onToggleSidebar,
-  toggleSidebarShortcutLabel: _toggleSidebarShortcutLabel,
-  canGoBack: _canGoBack = false,
-  canGoForward: _canGoForward = false,
-  onGoBack: _onGoBack,
-  onGoForward: _onGoForward,
-  goBackShortcutLabel: _goBackShortcutLabel,
-  goForwardShortcutLabel: _goForwardShortcutLabel,
   onOpenCommandCenter,
   onOpenAutomations,
   onOpenPluginStore,
@@ -308,17 +298,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   reconnectingRemoteWorkspaceLogsByWorkspaceKey?: Record<string, RemoteConnectionLogEntry[]>;
   isDesktop?: boolean;
   isWebRemoteControl?: boolean;
-  isMacDesktop?: boolean;
   isWindowsDesktop?: boolean;
-  isSidebarVisible?: boolean;
-  onToggleSidebar?: () => void;
-  toggleSidebarShortcutLabel?: string;
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-  onGoBack?: () => void;
-  onGoForward?: () => void;
-  goBackShortcutLabel?: string;
-  goForwardShortcutLabel?: string;
   onOpenCommandCenter: () => void;
   onOpenAutomations?: () => void;
   onOpenPluginStore?: () => void;

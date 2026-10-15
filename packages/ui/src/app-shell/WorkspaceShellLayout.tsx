@@ -2353,7 +2353,10 @@ export const WorkspaceShellLayout = memo(
             data-workspace-sidebar-panel="true"
             id="sidebar"
             className={cn(
-              "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
+              // 切换宽度不做动画：width 过渡会让整棵应用在 200ms 内逐帧重排
+              // （实测每帧 55-120ms，165Hz 下约 35 帧全部掉帧，issue #44）。
+              // 宽度瞬时切换 + opacity 淡出，和拖拽路径的 width 语义保持一致。
+              "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-opacity",
               // 修复原因：拖动侧栏宽度时如果继续过渡 width，会让指针移动和实际宽度之间产生滞后。
               // 拖拽 active 通过 DOM 标记切 transition，避免 pointerdown/up 为了切 class 重渲染整棵 workspace。
               isWebRemoteControlShell &&
@@ -2444,17 +2447,7 @@ export const WorkspaceShellLayout = memo(
                     user={user}
                     isDesktop={isDesktop}
                     isWebRemoteControl={isWebRemoteControlShell}
-                    isMacDesktop={isMacDesktop}
                     isWindowsDesktop={isWindowsDesktop}
-                    isSidebarVisible={isSidebarVisible}
-                    onToggleSidebar={handleToggleSidebar}
-                    toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
-                    canGoBack={canPrimaryNavigationBack}
-                    canGoForward={canTaskNavForward}
-                    onGoBack={primaryNavigationBack}
-                    onGoForward={handleTaskNavForward}
-                    goBackShortcutLabel={goBackShortcutLabel}
-                    goForwardShortcutLabel={goForwardShortcutLabel}
                     onOpenCommandCenter={handleOpenCommandCenter}
                     onOpenAutomations={handleOpenAutomations}
                     automationsActive={workspaceMainView === "automations"}

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type {
   GitChangeSourceId,
   GitRepositorySummary,
@@ -83,7 +83,7 @@ export interface V4ChatPaneProps {
  * 竖切聊天区：替换 ChatView 的最小入口。
  * 外层按 workspace 包 V4ConversationProvider；单 pane paneId 固定 workspace-main。
  */
-export function V4ChatPane({
+export function V4ChatPaneImpl({
   workspacePath,
   workspaceIdentity,
   isDesktop = false,
@@ -175,3 +175,10 @@ export function V4ChatPane({
     </V4ConversationProvider>
   );
 }
+
+/**
+ * 侧栏切换等壳层状态变化时，聊天区的大树（SessionPane 5841 行）不应跟着重渲染：
+ * 这里的 props 全部是壳层稳定引用（useCallback/state 对象），memo 能在
+ * isSidebarVisible 翻转时整棵跳过（issue #44 的切换掉帧残余成本）。
+ */
+export const V4ChatPane = memo(V4ChatPaneImpl);
