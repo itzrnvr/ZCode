@@ -3,7 +3,7 @@
 // stable per-section file; a watcher here picks up external saves and writes
 // them back into settings, then broadcasts SettingsChanged so every window
 // refreshes its snapshot (same convention as the shortcut rebinding broadcast).
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcMain } from "electron";
@@ -137,7 +137,11 @@ export function registerPromptOverrideIpc(options: {
         ensureWatcher();
         return { path: filePath };
       } catch (error) {
-        options.logger.warn("[prompt-overrides] export failed", error);
+        options.logger.warn("[prompt-overrides] export failed", {
+          message: error instanceof Error ? error.message : String(error),
+          code: (error as NodeJS.ErrnoException | null)?.code ?? null,
+          dir,
+        });
         return { success: false, error: "export_failed" };
       }
     },

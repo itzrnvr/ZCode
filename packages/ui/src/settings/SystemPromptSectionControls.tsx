@@ -196,9 +196,10 @@ export function exportPayloadFor(
 ): { fileKey: string; fileName: string; content: string } | undefined {
   if (section.capability !== "editable" || !section.edit) return undefined;
   if (section.edit.kind === "section-text") {
+    const fileKey = `section-${section.edit.sectionKey}`;
     return {
-      fileKey: `section-${section.edit.sectionKey}`,
-      fileName: `${section.edit.sectionKey}.md`,
+      fileKey,
+      fileName: `${fileKey}.md`,
       content: effectiveContent,
     };
   }
