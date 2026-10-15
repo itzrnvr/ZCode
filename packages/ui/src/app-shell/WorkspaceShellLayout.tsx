@@ -2391,6 +2391,12 @@ export const WorkspaceShellLayout = memo(
               aria-hidden={
                 !isSidebarPanelVisible || !renderWebRemoteNavigationPanel
               }
+              // 折叠态（4px 裁剪）里整棵任务列表仍会参与布局，实测占侧栏切换
+              // 长帧的 20-45ms。content-visibility: hidden 让折叠时跳过子树布局与绘制，
+              // 面板盒子（4px 宽）本身大小不受影响，展开时恢复一次布局。
+              style={
+                isSidebarPanelVisible ? undefined : { contentVisibility: "hidden" }
+              }
             >
               <ScopedErrorBoundary
                 scope="workspace-sidebar"
