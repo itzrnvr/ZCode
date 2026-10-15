@@ -159,6 +159,9 @@ export function createDesktopPlatform(options: {
       window.zcode.onChromeImportProgress?.(callback) ?? (() => {}),
     getChromeProcessCount: () =>
       window.zcode.getChromeProcessCount?.() ?? Promise.resolve({ count: 0 }),
+    exportPromptOverrideToFile: (payload) =>
+      window.zcode.exportPromptOverrideToFile?.(payload) ??
+      Promise.resolve({ success: false as const, error: "unsupported" }),
     onUpdateCheckResult: (callback) => window.zcode.onUpdateCheckResult(callback),
     onUpdateStateChanged: (callback) => window.zcode.onUpdateStateChanged?.(callback) ?? (() => {}),
     getUpdateState: () =>

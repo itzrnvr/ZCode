@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/collapsible.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SettingsGroupCard } from "@/settings/SettingsPageParts.js";
+import { PromptOpenExistingFileButton } from "@/settings/PromptOverrideEditorButton.js";
 import {
   AGENTS_MD_RESOLUTION_ORDER,
   findCatalogSectionByLiveSourceId,
@@ -90,6 +91,10 @@ export function AgentsMdResolutionCard({ preview }: { preview: SystemPromptPrevi
                 <span className="min-w-0 flex-1 font-mono text-ui-sm text-foreground">
                   {file.path}
                 </span>
+                <PromptOpenExistingFileButton
+                  path={file.path}
+                  labelId="settings.systemPrompt.openInEditor"
+                />
                 <Badge variant="secondary">
                   {intl.formatMessage({
                     id:

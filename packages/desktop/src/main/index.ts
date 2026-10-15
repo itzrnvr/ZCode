@@ -29,6 +29,7 @@ import {
 import { createDesktopBrowserScreenshotSurfaceCoordinator } from "./browserView/browserScreenshotSurfaceCoordinatorWiring.js";
 import { EMBEDDED_BROWSER_PARTITION } from "./browserDataManager.js";
 import { wireDiagnosticsServer } from "./diagnosticsWiring.js";
+import { registerPromptOverrideIpc } from "./promptOverrideFiles.js";
 import { EmbeddedBrowserJavaScriptDialogController } from "./embeddedBrowserJavaScriptDialog.js";
 import {
   browserOperationResetsResizeBaseline,
@@ -2161,6 +2162,19 @@ app.whenReady().then(async () => {
   // agent 看日志/状态/截图/evaluate 不再需要控整台 PC。失败不阻塞启动。
   // evaluate 需设置显式开（diagnosticsEvaluateEnabled），默认只读。
   wireDiagnosticsServer({ logger, evaluateEnabled: bootstrapSettings?.diagnosticsEvaluateEnabled ?? false });
+  // Prompt 覆盖文件（设置页「在编辑器中打开」）：导出 + 外部保存写回设置。
+  registerPromptOverrideIpc({
+    getSettingService: () => mainSettingService,
+    broadcastSettingsChanged: () => {
+      for (const win of getApplicationWindowsExcludingCuaIndicator()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send(PlatformChannels.SettingsChanged);
+        }
+      }
+    },
+    userDataPath: app.getPath("userData"),
+    logger,
+  });
   // scheduler 也会打开 tasks-index；等 Host 完成统一准备，避免在启动页出现前抢先迁移。
   configureDatabaseStartupQuit(() => {
     markExplicitQuit("database-startup-exit");

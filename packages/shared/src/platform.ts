@@ -1124,6 +1124,15 @@ export interface IPlatformService {
   getChromeProcessCount?(): Promise<{ count: number }>;
   /** 订阅导入实时进度（关 Chrome、逐 Profile/作用域计数）；返回 disposer。 */
   onChromeImportProgress?(callback: (update: ChromeImportProgressUpdate) => void): () => void;
+  /**
+   * 把 prompt 覆盖文本写为宿主侧可编辑文件（userData/prompt-overrides/<key>.md），
+   * 返回文件路径；外部编辑保存后由 main 监听并写回设置。Desktop only。
+   */
+  exportPromptOverrideToFile?(payload: {
+    fileKey: string;
+    fileName: string;
+    content: string;
+  }): Promise<{ path: string } | { success: false; error: string }>;
   /** 清理内置浏览器持久化分区；cache 模式保留认证数据，all 模式清理全部站点数据。 */
   clearEmbeddedBrowserData?(mode: "cache" | "all"): Promise<EmbeddedBrowserDataClearResult>;
 

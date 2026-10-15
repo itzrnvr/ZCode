@@ -430,6 +430,8 @@ export const PlatformChannels = {
   GetChromeProcessCount: "zcode:get-chrome-process-count",
   /** Main → Renderer：导入实时进度推流（关 Chrome、逐 Profile/作用域计数）。 */
   ChromeImportProgress: "zcode:chrome-import-progress",
+  /** Renderer → Main：把 prompt 覆盖文本导出为可外部编辑的文件。 */
+  ExportPromptOverrideToFile: "zcode:export-prompt-override-to-file",
   /** Renderer → Main：清理内置浏览器缓存或全部站点数据。 */
   ClearEmbeddedBrowserData: "zcode:clear-embedded-browser-data",
   /** Renderer → Main：读取内置浏览器站点权限记录（设置页「网站权限」） */

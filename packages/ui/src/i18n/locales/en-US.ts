@@ -2551,6 +2551,7 @@ const enUS: Record<string, string> = {
   "settings.systemPrompt.editorSaving": "Saving…",
   "settings.systemPrompt.editorSaved": "Saved automatically.",
   "settings.systemPrompt.resetToDefault": "Reset to default",
+  "settings.systemPrompt.openInEditor": "Open in editor",
   "settings.systemPrompt.clearOverride": "Clear override",
   "settings.systemPrompt.agentsMdFilesTitle": "AGENTS.md files",
   "settings.systemPrompt.agentsMdFilesHint":

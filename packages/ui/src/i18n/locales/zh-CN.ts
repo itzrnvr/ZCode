@@ -2402,6 +2402,7 @@ const zhCN: Record<string, string> = {
   "settings.systemPrompt.editorSaving": "保存中…",
   "settings.systemPrompt.editorSaved": "已自动保存。",
   "settings.systemPrompt.resetToDefault": "恢复默认",
+  "settings.systemPrompt.openInEditor": "在编辑器中打开",
   "settings.systemPrompt.clearOverride": "清除覆盖",
   "settings.systemPrompt.agentsMdFilesTitle": "AGENTS.md 文件",
   "settings.systemPrompt.agentsMdFilesHint":

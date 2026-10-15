@@ -289,6 +289,10 @@ export function SystemPromptSection({
                 section={section}
                 overrideValue={overrideValueFor(section)}
                 onSave={saveOverrideFor(section)}
+                // 「在编辑器中打开」导出的是模型实际看到的生效文本（覆盖优先，回退内置默认）。
+                effectiveContent={
+                  overrideValueFor(section).trim() || (section.defaultText ?? "")
+                }
               />
             ))}
           </SettingsGroupCard>

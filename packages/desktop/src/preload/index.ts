@@ -817,6 +817,11 @@ contextBridge.exposeInMainWorld("zcode", {
     ipcRenderer.on(PlatformChannels.ChromeImportProgress, handler);
     return () => ipcRenderer.removeListener(PlatformChannels.ChromeImportProgress, handler);
   },
+  /** 把 prompt 覆盖文本写为宿主侧可编辑文件并返回路径。 */
+  exportPromptOverrideToFile: (
+    payload: { fileKey: string; fileName: string; content: string },
+  ): Promise<{ path: string } | { success: false; error: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ExportPromptOverrideToFile, payload),
   clearEmbeddedBrowserData: (mode: "cache" | "all") =>
     ipcRenderer.invoke(PlatformChannels.ClearEmbeddedBrowserData, mode),
   /** 读取开发态 stdio tap proxy 开关状态 */

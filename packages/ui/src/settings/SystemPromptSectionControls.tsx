@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SettingsRow } from "@/settings/SettingsPageParts.js";
 import { SettingsFormTextarea } from "@/settings/SettingsFormTextarea.js";
+import { PromptOpenInEditorButton } from "@/settings/PromptOverrideEditorButton.js";
 import type { PromptSectionMeta } from "@/settings/systemPromptCatalog.js";
 
 export type SystemPromptSwitchKey =
@@ -83,6 +84,7 @@ function OverridableTextEditor({
   onSave,
   testIdSuffix,
   rows = 6,
+  exportOverride,
 }: {
   description: string;
   value: string;
@@ -92,6 +94,7 @@ function OverridableTextEditor({
   onSave: (value: string) => Promise<void>;
   testIdSuffix: string;
   rows?: number;
+  exportOverride?: { fileKey: string; fileName: string; content: string };
 }) {
   const { intl } = useZCodeIntl();
   const effective = value.trim() ? value : (defaultValue ?? "");
@@ -159,7 +162,7 @@ function OverridableTextEditor({
             variant="outline"
             size="sm"
             disabled={!hasOverride}
-            data-testid={`${TID_SETTINGS_SYSTEM_PROMPT_SWITCH}:reset-${testIdSuffix}`}
+            data-testid={`{TID_SETTINGS_SYSTEM_PROMPT_SWITCH}:reset-{testIdSuffix}`}
             onClick={() => void reset()}
           >
             {intl.formatMessage({ id: "settings.systemPrompt.resetToDefault" })}
@@ -169,7 +172,7 @@ function OverridableTextEditor({
             variant="outline"
             size="sm"
             disabled={!hasOverride}
-            data-testid={`${TID_SETTINGS_SYSTEM_PROMPT_SWITCH}:clear-${testIdSuffix}`}
+            data-testid={`{TID_SETTINGS_SYSTEM_PROMPT_SWITCH}:clear-{testIdSuffix}`}
             onClick={() => {
               setDraft("");
               void commit("");
@@ -178,12 +181,33 @@ function OverridableTextEditor({
             {intl.formatMessage({ id: "settings.systemPrompt.clearOverride" })}
           </Button>
         )}
+        {exportOverride ? (
+          <PromptOpenInEditorButton payload={exportOverride} labelId="settings.systemPrompt.openInEditor" />
+        ) : null}
       </div>
     </div>
   );
 }
 
-/** Capability story for a row: what the user can do here, and why not more. */
+/** fileKey/fileName ↔ 设置字段映射：main 侧 watcher 按同名约定写回。 */
+export function exportPayloadFor(
+  section: PromptSectionMeta,
+  effectiveContent: string,
+): { fileKey: string; fileName: string; content: string } | undefined {
+  if (section.capability !== "editable" || !section.edit) return undefined;
+  if (section.edit.kind === "section-text") {
+    return {
+      fileKey: `section-${section.edit.sectionKey}`,
+      fileName: `${section.edit.sectionKey}.md`,
+      content: effectiveContent,
+    };
+  }
+  if (section.edit.kind === "security-notice-text") {
+    return { fileKey: "security-notice", fileName: "security-notice.md", content: effectiveContent };
+  }
+  return { fileKey: "custom-prompt", fileName: "custom-prompt.md", content: effectiveContent };
+}
+
 function CapabilityBadges({
   section,
   switchLabel,
@@ -216,15 +240,20 @@ export function PromptSectionRow({
   section,
   overrideValue,
   onSave,
+  effectiveContent,
 }: {
   section: PromptSectionMeta;
   overrideValue: string;
   onSave: (value: string) => Promise<void>;
+  /** The text the model actually sees today; the editor export starts from it. */
+  effectiveContent: string;
 }) {
   const { intl } = useZCodeIntl();
   const switchLabel = section.switchKey
     ? intl.formatMessage({ id: SWITCH_LABEL_IDS[section.switchKey] })
     : undefined;
+  // 「在编辑器中打开」的导出载荷：文件名即设置字段的映射键，main 据此写回。
+  const exportOverride = exportPayloadFor(section, effectiveContent);
   return (
     <div className="border-t border-border px-4 py-3 first:border-t-0">
       <div className="text-ui-base font-medium text-foreground">{section.name}</div>
@@ -251,6 +280,7 @@ export function PromptSectionRow({
           onSave={onSave}
           testIdSuffix={`section-${section.key}`}
           rows={section.key === "custom-prompt" ? 8 : 6}
+          exportOverride={exportPayloadFor(section, effectiveContent)}
         />
       ) : section.defaultText ? (
         <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-surface px-3 py-2 font-mono text-ui-sm text-foreground-subtle">
