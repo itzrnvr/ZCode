@@ -210,12 +210,11 @@ async function foldOnce(host: ProjectionFoldHost, sessionId: string): Promise<Fo
     await store.deleteConversationProjection(sessionID);
     return "skipped";
   }
-  if (session.revert != null) {
-    // delete-on-uncertain：活跃分支不可由有界尾部重建（bridge 因此拒绝 messagesTail，
-    // 实测 2703-part 会话被截成 6 条消息 -> 空会话）。watermark 保留，revision 不能倒退。
-    await store.deleteConversationProjection(sessionID);
-    return "skipped";
-  }
+  // revert 会话曾经被 delete-on-uncertain 跳过 fold：尾读无法重建其活跃分支
+  // （实测 2703-part 会话被截成 6 条消息 -> 空会话），于是它们永远只有 500 尾读水化，
+  // hasOlderRows 恒 false，首屏之后的历史补不回来。但 fold 是投影的唯一离线写者：
+  // 不写就永远走尾读。fold 用全量读 + 活跃分支裁剪是确定性可行的（回放是纯函数），
+  // 所以 revert 会话也走下面的全量重建，不再跳过。
   const revision = revisionOf(session.time.updated, expectedSeq);
   // fold 是投影的落盘权威：必须覆盖全量历史（readFullSessionMessages）。尾读 fold 会把
   // >500 条消息的会话永久截成尾窗（投影首行 = 尾窗首行 → hasOlderRows 恒 false），
