@@ -53,6 +53,10 @@ function safeName(fileKey: string): string | null {
   return /^[a-z0-9-]{1,64}$/i.test(fileKey) ? fileKey : null;
 }
 
+function safeFileName(fileName: string): string | null {
+  return /^[a-z0-9-]{1,64}\.md$/i.test(fileName) ? fileName : null;
+}
+
 export function registerPromptOverrideIpc(options: {
   getSettingService: () => ISettingService | undefined;
   broadcastSettingsChanged: () => void;
@@ -114,9 +118,12 @@ export function registerPromptOverrideIpc(options: {
     async (_event, value: unknown): Promise<{ path: string } | { success: false; error: string }> => {
       try {
         const payload = value as Partial<ExportPayload> | undefined;
+        // fileName 携带 .md 扩展名；fileKey 必须与去掉扩展名后的 fileName 完全一致，
+        // 防止两个输入各自合法却指向不同文件。
+        const fileName = safeFileName(String(payload?.fileName ?? ""));
         const fileKey = safeName(String(payload?.fileKey ?? ""));
-        const fileName = safeName(String(payload?.fileName ?? ""));
-        if (!fileKey || !fileName || fileName !== `${fileKey}.md`) {
+        const expectedFileKey = fileName ? fileName.replace(/\.md$/i, "") : null;
+        if (!fileKey || !fileName || !expectedFileKey || fileKey !== expectedFileKey) {
           return { success: false, error: "invalid_file_key" };
         }
         const content = typeof payload?.content === "string" ? payload.content : "";
