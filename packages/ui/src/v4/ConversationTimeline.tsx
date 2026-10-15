@@ -1234,6 +1234,51 @@ function ConversationTimelineImpl({
     let observedViewportHeight = scrollRef.current?.clientHeight ?? 0;
     let observeContentFrame: number | null = null;
     let disposed = false;
+    // 宽度稳定后的精确批次：批量测高 + flushSync 同步提交，由调用方决定是否吸底。
+    // 只应在 settle 时调用一次，不要在宽度过渡的每一帧调用（issue #44 掉帧根因）。
+    const runExactWidthSettleBatch = () => {
+      // 本批次统一提交布局与吸底，其间其他内容 effect 不得按中间高度吸底。
+      observer.unobserve(contentColumn);
+      const messageLayer = messageLayerRef.current;
+      const maskObserver = messageLayerMaskObserverRef.current;
+      // 同步占位高度也会改变父消息层的高度；其蒙层观察器需要一起暂停，
+      // 否则在更深层的 RO 通知中改变父层，会产生 undelivered notifications。
+      if (messageLayer) maskObserver?.unobserve(messageLayer);
+      committingMeasuredLayoutRef.current = true;
+      try {
+        // virtualizer 的 ResizeObserver 默认异步提交 React；先吸底会使用旧占位高度，
+        // 下一帧测高提交后再跳一次。仅在 observer 内批量测高并同步提交，避免跨帧追赶。
+        const measurements = Array.from(
+          contentColumn.querySelectorAll(":scope > [data-index]"),
+          (node) => ({
+            index: Number(node.getAttribute("data-index")),
+            height: measureElement(node, undefined),
+          }),
+        );
+        flushSync(() => {
+          for (const item of measurements) virtualizer.resizeItem(item.index, item.height);
+          // 缓存可能已经更新且没有差量，仍需明确提交，不能依赖空回调冲刷旧任务。
+          commitMeasuredLayout((revision) => revision + 1);
+        });
+      } finally {
+        committingMeasuredLayoutRef.current = false;
+        // 暂停的是本批次会写入高度的观察目标，不推迟测高或吸底。下一帧继续
+        // 观察内容列宽度，以覆盖视口停止后仍在进行的 CSS 宽度过渡。
+        if (observeContentFrame !== null) window.cancelAnimationFrame(observeContentFrame);
+        if (!disposed) {
+          observeContentFrame = window.requestAnimationFrame(() => {
+            observeContentFrame = null;
+            observer.observe(contentColumn);
+            if (
+              messageLayer &&
+              messageLayerRef.current === messageLayer &&
+              messageLayerMaskObserverRef.current === maskObserver
+            )
+              maskObserver?.observe(messageLayer);
+          });
+        }
+      }
+    }
     const observer = new ResizeObserver(() => {
       const nextWidth = contentColumn.clientWidth;
       const element = scrollRef.current;
@@ -1255,57 +1300,29 @@ function ConversationTimelineImpl({
         }),
       );
       if (followingRef.current) {
+        // 吸底分支：宽度过渡进行中每帧只做轻量吸底补偿（一次 scrollHeight 读 +
+        // 一次 scrollTop 写），行偏移交给 virtualizer 自身的逐项 ResizeObserver
+        // 异步跟帧。原先每帧 measure+flushSync 会把整段 200ms 宽度过渡变成一串
+        // 50-160ms 的同步长帧（issue #44 侧栏切换掉帧的根因）。
+        // 精确测高+同步提交推迟到宽度稳定后一次性执行（下方 settle 定时器）。
+        markProgrammaticScroll();
+        element.scrollTop = element.scrollHeight;
+        lastObservedScrollTopRef.current = element.scrollTop;
+        contentWidthResizeActiveRef.current = true;
         if (contentWidthResizeSettleTimerRef.current !== null) {
           window.clearTimeout(contentWidthResizeSettleTimerRef.current);
+        }
+        contentWidthResizeSettleTimerRef.current = window.setTimeout(() => {
           contentWidthResizeSettleTimerRef.current = null;
-        }
-        // 本批次统一提交布局与吸底，其间其他内容 effect 不得按中间高度吸底。
-        observer.unobserve(contentColumn);
-        const messageLayer = messageLayerRef.current;
-        const maskObserver = messageLayerMaskObserverRef.current;
-        // 同步占位高度也会改变父消息层的高度；其蒙层观察器需要一起暂停，
-        // 否则在更深层的 RO 通知中改变父层，会产生 undelivered notifications。
-        if (messageLayer) maskObserver?.unobserve(messageLayer);
-        committingMeasuredLayoutRef.current = true;
-        try {
-          // virtualizer 的 ResizeObserver 默认异步提交 React；先吸底会使用旧占位高度，
-          // 下一帧测高提交后再跳一次。仅在 observer 内批量测高并同步提交，避免跨帧追赶。
-          const measurements = Array.from(
-            contentColumn.querySelectorAll(":scope > [data-index]"),
-            (node) => ({
-              index: Number(node.getAttribute("data-index")),
-              height: measureElement(node, undefined),
-            }),
-          );
-          flushSync(() => {
-            for (const item of measurements) virtualizer.resizeItem(item.index, item.height);
-            // 缓存可能已经更新且没有差量，仍需明确提交，不能依赖空回调冲刷旧任务。
-            commitMeasuredLayout((revision) => revision + 1);
-          });
-        } finally {
-          committingMeasuredLayoutRef.current = false;
-          // 暂停的是本批次会写入高度的观察目标，不推迟测高或吸底。下一帧继续
-          // 观察内容列宽度，以覆盖视口停止后仍在进行的 CSS 宽度过渡。
-          if (observeContentFrame !== null) window.cancelAnimationFrame(observeContentFrame);
-          if (!disposed) {
-            observeContentFrame = window.requestAnimationFrame(() => {
-              observeContentFrame = null;
-              observer.observe(contentColumn);
-              if (
-                messageLayer &&
-                messageLayerRef.current === messageLayer &&
-                messageLayerMaskObserverRef.current === maskObserver
-              )
-                maskObserver?.observe(messageLayer);
-            });
-          }
-        }
-        if (disposed) return;
-        stableContentWidthRef.current = contentColumn.clientWidth;
-        contentWidthResizeActiveRef.current = false;
-        // 同步提交可能触发其他布局处理；用户上滚或定位始终优先。
-        if (followingRef.current && getActiveUserScrollIntent() !== "awayFromBottom")
-          scrollToBottom();
+          if (disposed) return;
+          runExactWidthSettleBatch();
+          if (disposed) return;
+          stableContentWidthRef.current = contentColumn.clientWidth;
+          contentWidthResizeActiveRef.current = false;
+          // 同步提交可能触发其他布局处理；用户上滚或定位始终优先。
+          if (followingRef.current && getActiveUserScrollIntent() !== "awayFromBottom")
+            scrollToBottom();
+        }, CONTENT_WIDTH_RESIZE_SETTLE_MS);
         return;
       }
       if (nextWidth === stableContentWidthRef.current) return;
@@ -1342,6 +1359,7 @@ function ConversationTimelineImpl({
     commitFollowing,
     getActiveUserScrollIntent,
     markLayoutScrollGuard,
+    markProgrammaticScroll,
     measureElement,
     renderUnits.length === 0,
     scrollToBottom,
