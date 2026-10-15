@@ -2229,13 +2229,10 @@ export function createConversationV4Gateway(
       // 其余任何活事件（turn/hook/boundary/RewindTriggered/workflow 重放）一律整条绕过。
       // 判定与指纹在 cold-hydration-cache-plan.ts，可被真实 resume→hydrate 顺序驱动测试。
       const contextWindow = resolveSessionModelContextWindow(context, record);
-      // 与 materialization 自己那个分支同一个判据（cold-event-merge.ts:86-88）：有尾读就用尾读，
-      // 没有就回落全量（buildMaterializationStore 刻意不转发 messagesTail，见 f141156）。
-      // 两者在同一水位下会合成出不同的行，所以必须分键——否则尾读写的载荷会被全量路径命中。
-      // 判定与写前复核必须用同一个值，否则复核永远对不上。
-      const transcriptScope: ColdHydrationTranscriptScope = persistedMessages?.length
-        ? "tail-500"
-        : "full";
+      // materialization 现在恒以全量 transcript 水化投影（见 f141156 之后的修正：
+      // 尾读水化会让投影首行 = 尾窗首行，hasOlderRows 恒 false，>500 条消息的历史
+      // 永远不可达）。缓存键必须与水化口径一致，否则尾读口径的旧载荷会被命中。
+      const transcriptScope: ColdHydrationTranscriptScope = "full";
       const cachePlan = await planColdHydrationCache({
         contextWindow,
         events,

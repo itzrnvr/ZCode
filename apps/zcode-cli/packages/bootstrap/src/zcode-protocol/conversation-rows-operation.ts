@@ -16,7 +16,7 @@ import {
   buildConversationProjectionRows,
   type ProjectionMaterializationStore,
 } from "../zcode-protocol-v4/conversation-projection-store.js";
-import { readPersistedSessionMessages } from "./server-operations.js";
+import { readFullSessionMessages } from "./server-operations.js";
 import { parseParams, type ZCodeProtocolAgentServerContext } from "./server-types.js";
 
 /**
@@ -217,11 +217,11 @@ async function foldOnce(host: ProjectionFoldHost, sessionId: string): Promise<Fo
     return "skipped";
   }
   const revision = revisionOf(session.time.updated, expectedSeq);
-  // 尾读必须与 resume / 视图冷物化共用同一份约定（readPersistedSessionMessages，
-  // messagesTail limit=500）。turnId 是 hydrate-turn-${turnNumber}，turnNumber 从传入数组的
-  // 第一条开始数；全量读与 500 尾部读对 >500 part 的会话会数出不同的 turn 序号，
-  // rowId 与 turnId 双双分叉 —— 那正是 bridge 注释里钉住的那条 bug。
-  const persistedMessages = await readPersistedSessionMessages(context, sessionId);
+  // fold 是投影的落盘权威：必须覆盖全量历史（readFullSessionMessages）。尾读 fold 会把
+  // >500 条消息的会话永久截成尾窗（投影首行 = 尾窗首行 → hasOlderRows 恒 false），
+  // 后续冷开走存储快路径时同样拿不到更早历史。全量读也让 turn 序号（hydrate-turn-N
+  // 从传入数组第一条数起）与 resume/视图冷物化在全量口径下保持一致，rowId/turnId 不分叉。
+  const persistedMessages = await readFullSessionMessages(context, sessionId);
   const rows = await buildConversationProjectionRows(
     sessionId,
     materializationStoreOf(store),

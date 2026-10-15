@@ -3631,6 +3631,21 @@ export async function readPersistedSessionMessages(
   return await (store.messages({ sessionID: sessionId as SessionId }) ?? []);
 }
 
+/**
+ * 会话的全量读（无 500 行界）。投影水化与离线 fold 必须用它：loadOlder/rowsRange
+ * 的唯一数据源是投影行集，尾读水化会让投影首行 = 尾窗首行，客户端 hasOlderRows
+ * 恒为 false，超过 500 条消息的历史永远不可达。resume 的上下文裁剪等非投影用途
+ * 继续走 readPersistedSessionMessages。
+ */
+export async function readFullSessionMessages(
+  context: ZCodeProtocolAgentServerContext,
+  sessionId: string,
+): Promise<MessageWithParts[]> {
+  const store = context.deps.sessionStore;
+  if (!store) return [];
+  return await (store.messages({ sessionID: sessionId as SessionId }) ?? []);
+}
+
 function derivePersistedSessionMode(
   messages: readonly MessageWithParts[],
 ): ZCodeSessionCreateParams["mode"] | undefined {
